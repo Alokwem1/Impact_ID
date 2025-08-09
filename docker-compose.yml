@@ -3,34 +3,58 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: impact_id_prod
-      POSTGRES_USER: impact_user
-      POSTGRES_PASSWORD: secure_password_here
+      POSTGRES_DB: ${POSTGRES_DB:-impact_id_prod}
+      POSTGRES_USER: ${POSTGRES_USER:-impact_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   backend:
     build: ./backend
+    restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://impact_user:secure_password_here@postgres:5432/impact_id_prod
-      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
     depends_on:
       - postgres
-    volumes:
-      - ./backend:/app
+    # NOTE: Do not bind-mount source in production. For development keep a docker-compose.override.yml
+    # volumes:
+    #   - ./backend:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     ports:
       - "80:80"
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   postgres_data:

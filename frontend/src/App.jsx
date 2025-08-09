@@ -1,9 +1,10 @@
 import { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { ErrorBoundary } from 'react-error-boundary';
+import { AnimatePresence } from "framer-motion";
 
 // Enhanced imports
 import { AuthProvider } from './utils/AuthContext';
@@ -29,13 +30,14 @@ const BadgeListPage = lazy(() => import('./user/BadgeList'));
 const LeaderboardPage = lazy(() => import('./user/Leaderboard'));
 const QuizPage = lazy(() => import('./tasks/QuizPage'));
 
-// Enhanced React Query client with error handling
+// Enhanced React Query client with safer error handling
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000, // 5 minutes
+      staleTime: 5 * 60 * 1000,
       retry: (failureCount, error) => {
-        if (error?.response?.status === 401) return false;
+        const status = error?.response?.status || error?.status;
+        if (status === 401) return false;
         return failureCount < 2;
       },
       refetchOnWindowFocus: false,
@@ -50,7 +52,7 @@ const queryClient = new QueryClient({
   },
 });
 
-// Enhanced Error Fallback Component
+// Enhanced Error Fallback
 const ErrorFallback = ({ error, resetErrorBoundary }) => (
   <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center p-4">
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-8 max-w-md w-full text-center">
@@ -71,6 +73,7 @@ const ErrorFallback = ({ error, resetErrorBoundary }) => (
       <div className="space-y-3">
         <button
           onClick={resetErrorBoundary}
+          aria-label="Retry loading the application"
           className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
         >
           🔄 Try Again
@@ -78,6 +81,7 @@ const ErrorFallback = ({ error, resetErrorBoundary }) => (
         
         <button
           onClick={() => window.location.href = '/'}
+          aria-label="Go back to home page"
           className="w-full bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
         >
           🏠 Go Home
@@ -90,7 +94,7 @@ const ErrorFallback = ({ error, resetErrorBoundary }) => (
             Error Details (Development)
           </summary>
           <pre className="mt-2 text-xs bg-gray-100 dark:bg-gray-700 p-2 rounded overflow-auto">
-            {error.message}
+            {String(error)}
           </pre>
         </details>
       )}
@@ -98,12 +102,12 @@ const ErrorFallback = ({ error, resetErrorBoundary }) => (
   </div>
 );
 
-// Enhanced loading component with Impact ID branding
+// Accessible Loading Spinner
 const LoadingSpinner = () => (
   <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
     <div className="flex flex-col items-center space-y-6">
       {/* Impact ID Logo Animation */}
-      <div className="relative">
+      <div className="relative" role="status" aria-live="polite">
         <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center animate-pulse">
           <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
             <path d="M12 2L3.09 8.26L4 21L12 22L20 21L20.91 8.26L12 2Z" stroke="currentColor" strokeWidth="2" fill="none"/>
@@ -114,7 +118,7 @@ const LoadingSpinner = () => (
       </div>
       
       {/* Loading Animation */}
-      <div className="flex space-x-1">
+      <div className="flex space-x-1" aria-hidden="true">
         {[1, 2, 3].map((i) => (
           <div
             key={i}
@@ -133,9 +137,133 @@ const LoadingSpinner = () => (
           Loading your impact journey...
         </p>
       </div>
+      <span className="sr-only">Loading...</span>
     </div>
   </div>
 );
+
+function AnimatedRoutes() {
+  const location = useLocation(); // for AnimatePresence transitions
+  return (
+    <AnimatePresence mode="wait">
+      <Routes location={location} key={location.pathname}>
+        {/* 🌐 PUBLIC ROUTES */}
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/signup" element={<Navigate to="/register" replace />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+
+        {/* 🔒 PROTECTED ROUTES */}
+        <Route 
+          path="/dashboard" 
+          element={
+            <ProtectedRoute>
+              <DashboardPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/onboarding" 
+          element={
+            <ProtectedRoute requireVerification={false}>
+              <OnboardingPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/admin/*" 
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <AdminDashboardPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/profile/:username" 
+          element={
+            <ProtectedRoute>
+              <PublicProfilePage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/leaderboard" 
+          element={
+            <ProtectedRoute>
+              <LeaderboardPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/badges" 
+          element={
+            <ProtectedRoute>
+              <BadgeListPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/tasks" 
+          element={
+            <ProtectedRoute>
+              <TaskListPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/tasks/:taskId" 
+          element={
+            <ProtectedRoute>
+              <TaskDetailPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/quiz/:taskId" 
+          element={
+            <ProtectedRoute>
+              <QuizPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/submissions" 
+          element={
+            <ProtectedRoute>
+              <SubmissionHistoryPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        <Route 
+          path="/weaving" 
+          element={
+            <ProtectedRoute>
+              <WeavingLoomPage />
+            </ProtectedRoute>
+          } 
+        />
+
+        {/* 🔄 REDIRECTS */}
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />
+        {/* If not logged in, go to login instead of looping to dashboard */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </AnimatePresence>
+  );
+}
 
 function App() {
   return (
@@ -145,188 +273,49 @@ function App() {
           <AuthProvider>
             <Router>
               <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-200">
-                {/* WebSocket Manager for real-time features */}
                 <WebSocketManager />
-                
                 <Suspense fallback={<LoadingSpinner />}>
-                  <Routes>
-                    {/* 🌐 PUBLIC ROUTES */}
-                    <Route path="/login" element={<LoginPage />} />
-                    <Route path="/register" element={<RegisterPage />} />
-                    <Route path="/signup" element={<Navigate to="/register" replace />} />
-                    <Route path="/verify-email" element={<VerifyEmailPage />} />
-                    <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-                    <Route path="/reset-password" element={<ResetPasswordPage />} />
-                    
-                    {/* 🔒 PROTECTED ROUTES */}
-                    
-                    {/* Main Dashboard */}
-                    <Route 
-                      path="/dashboard" 
-                      element={
-                        <ProtectedRoute>
-                          <DashboardPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    {/* Onboarding (for new users) */}
-                    <Route 
-                      path="/onboarding" 
-                      element={
-                        <ProtectedRoute requireVerification={false}>
-                          <OnboardingPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    {/* Admin Routes */}
-                    <Route 
-                      path="/admin/*" 
-                      element={
-                        <ProtectedRoute roles={['admin']}>
-                          <AdminDashboardPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    {/* User Features */}
-                    <Route 
-                      path="/profile/:username" 
-                      element={
-                        <ProtectedRoute>
-                          <PublicProfilePage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    <Route 
-                      path="/leaderboard" 
-                      element={
-                        <ProtectedRoute>
-                          <LeaderboardPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    <Route 
-                      path="/badges" 
-                      element={
-                        <ProtectedRoute>
-                          <BadgeListPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    {/* Task Management */}
-                    <Route 
-                      path="/tasks" 
-                      element={
-                        <ProtectedRoute>
-                          <TaskListPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    <Route 
-                      path="/tasks/:taskId" 
-                      element={
-                        <ProtectedRoute>
-                          <TaskDetailPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    <Route 
-                      path="/quiz/:taskId" 
-                      element={
-                        <ProtectedRoute>
-                          <QuizPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    <Route 
-                      path="/submissions" 
-                      element={
-                        <ProtectedRoute>
-                          <SubmissionHistoryPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    {/* Impact Weaving */}
-                    <Route 
-                      path="/weaving" 
-                      element={
-                        <ProtectedRoute>
-                          <WeavingLoomPage />
-                        </ProtectedRoute>
-                      } 
-                    />
-                    
-                    {/* 🔄 REDIRECTS */}
-                    <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                    <Route path="/admin" element={<Navigate to="/admin/overview" replace />} />
-                    <Route path="*" element={<Navigate to="/dashboard" replace />} />
-                  </Routes>
+                  <AnimatedRoutes />
                 </Suspense>
               </div>
-              
-              {/* Enhanced toast notifications with Impact ID theming */}
+
               <Toaster 
                 position="top-right"
                 containerClassName="z-50"
                 toastOptions={{
                   duration: 4000,
                   style: {
-                    background: 'var(--color-surface)',
-                    color: 'var(--color-text-primary)',
+                    background: 'var(--color-surface, #fff)',
+                    color: 'var(--color-text-primary, #000)',
                     fontSize: '14px',
                     borderRadius: '12px',
                     padding: '12px 16px',
-                    boxShadow: 'var(--shadow-lg)',
-                    border: '1px solid var(--color-border)',
+                    boxShadow: 'var(--shadow-lg, 0 2px 8px rgba(0,0,0,0.15))',
+                    border: '1px solid var(--color-border, #e5e7eb)',
                   },
                   success: {
                     style: {
-                      background: 'var(--toast-success-bg)',
-                      color: 'var(--toast-success-text)',
-                    },
-                    iconTheme: {
-                      primary: 'var(--toast-success-text)',
-                      secondary: 'var(--toast-success-bg)',
+                      background: 'var(--toast-success-bg, #d1fae5)',
+                      color: 'var(--toast-success-text, #065f46)',
                     },
                   },
                   error: {
                     style: {
-                      background: 'var(--toast-error-bg)',
-                      color: 'var(--toast-error-text)',
-                    },
-                    iconTheme: {
-                      primary: 'var(--toast-error-text)',
-                      secondary: 'var(--toast-error-bg)',
+                      background: 'var(--toast-error-bg, #fee2e2)',
+                      color: 'var(--toast-error-text, #991b1b)',
                     },
                   },
                   loading: {
                     style: {
-                      background: 'var(--toast-info-bg)',
-                      color: 'var(--toast-info-text)',
-                    },
-                    iconTheme: {
-                      primary: 'var(--toast-info-text)',
-                      secondary: 'var(--toast-info-bg)',
+                      background: 'var(--toast-info-bg, #bfdbfe)',
+                      color: 'var(--toast-info-text, #1e3a8a)',
                     },
                   },
                 }}
               />
               
-              {/* React Query Devtools - only in development */}
               {import.meta.env.DEV && (
-                <ReactQueryDevtools 
-                  initialIsOpen={false}
-                  position="bottom-right"
-                />
+                <ReactQueryDevtools initialIsOpen={false} position="bottom-right" />
               )}
             </Router>
           </AuthProvider>

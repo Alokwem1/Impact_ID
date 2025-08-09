@@ -5,6 +5,7 @@ uvicorn[standard]==0.29.0       # ASGI server with logging, reloading, websocket
 # === 🗄️ Database & ORM ===
 sqlalchemy==2.0.30              # Modern, async-capable ORM
 psycopg2-binary==2.9.9          # PostgreSQL adapter
+asyncpg==0.28.0                 # Async PostgreSQL adapter required by SQLAlchemy async engines
 python-dotenv==1.0.1            # .env config
 alembic==1.11.2                 # Database migrations
 

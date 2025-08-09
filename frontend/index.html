@@ -22,6 +22,8 @@
     <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#2563eb">
     <meta name="msapplication-TileColor" content="#2563eb">
     <meta name="theme-color" content="#2563eb" id="theme-color-meta" />
+    <meta name="theme-color" content="#2563eb" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
     <meta name="color-scheme" content="light dark" />
     
     <!-- ================================
@@ -40,11 +42,13 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://impactid.xyz/" />
     <meta property="og:title" content="Impact ID - Build Your Digital Reputation" />
-    <meta property="og:description" content="Transform your real-world impact into verifiable digital reputation. Complete tasks, earn badges, and climb leaderboards." />
+    <meta property="og:description" content="Transform your real-world impact into verifiable digital reputation. Complete tasks, earn badges, climb leaderboards." />
     <meta property="og:image" content="https://impactid.xyz/og-image.png" />
+    <meta property="og:image:secure_url" content="https://impactid.xyz/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Impact ID Platform - Gamified Impact Tracking" />
+    <meta property="og:image:alt" content="Impact ID Platform — Gamified Impact Tracking Dashboard" />
     <meta property="og:site_name" content="Impact ID" />
     <meta property="og:locale" content="en_US" />
     
@@ -128,6 +132,9 @@
          🎨 ENHANCED CRITICAL CSS
          ================================ -->
     <style>
+      .hidden-content {
+        display: none;
+      }
       /* Critical CSS for faster initial render */
       :root {
         /* Core theme colors */
@@ -156,6 +163,25 @@
         --animation-normal: 300ms;
         --animation-slow: 500ms;
       }
+        /* Responsive loader spinner */
+        .loading-spinner {
+          width: 32px;
+          height: 32px;
+          border-width: 4px;
+          border-style: solid;
+          border-color: var(--color-surface);
+          border-top-color: var(--color-primary);
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin: 0 auto;
+          will-change: transform;
+          backface-visibility: hidden;
+        }
+        /* Responsive progress bar initial state */
+        #load-progress {
+          width: 0%;
+          transition: width var(--animation-slow) cubic-bezier(0.4, 0, 0.2, 1);
+        }
       
       @media (prefers-color-scheme: dark) {
         :root {
@@ -530,7 +556,7 @@
             Initializing platform...
           </div>
           <div class="w-64 h-2 bg-gray-200 dark:bg-gray-700 rounded-full mx-auto overflow-hidden">
-            <div id="load-progress" class="progress-bar h-full rounded-full" style="width: 0%" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+            <div id="load-progress" class="progress-bar h-full rounded-full" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Loading Progress"></div>
           </div>
           <div id="load-tip" class="text-xs text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
             💡 Tip: Create your first Impact ID by completing a task!
@@ -565,7 +591,7 @@
     <div id="root" class="js-loading min-h-screen" role="main" aria-label="Impact ID Application">
       <!-- This is where your entire React application will be mounted -->
     </div>
-    <main id="main-content" style="display: none;">
+  <main id="main-content" class="hidden-content">
       <!-- Main content anchor for accessibility -->
     </main>
     

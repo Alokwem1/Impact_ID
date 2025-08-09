@@ -1,6 +1,7 @@
-/* @tailwind base; */
-/* @tailwind components; */
-/* @tailwind utilities; */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* ================================
    🎨 IMPACT ID ENHANCED STYLES
@@ -8,7 +9,6 @@
 
 /* CSS Variables for Theme Support */
 :root {
-  /* Enhanced Light Theme Colors */
   --color-primary: #2563eb;
   --color-primary-dark: #1d4ed8;
   --color-primary-light: #3b82f6;
@@ -72,7 +72,7 @@
 }
 
 /* Enhanced Dark Theme */
-.dark {
+ .dark {
   --color-primary: #3b82f6;
   --color-primary-dark: #2563eb;
   --color-primary-light: #60a5fa;
@@ -778,6 +778,7 @@ body {
   height: 100%;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
   animation: shimmer 2s infinite;
+}
 /* Streak System */
 .streak-indicator {
   display: inline-flex;
@@ -799,7 +800,7 @@ body {
   background-color: rgba(154, 52, 18, 0.3);
   color: #fdba74;
 }
-  content: '';
+  content {
   position: absolute;
   top: 0;
   left: -100%;
@@ -1559,4 +1560,4 @@ body {
   50% {
     transform: translateY(-10px);
   }
-}}
+}git add .

@@ -381,7 +381,7 @@ if STATIC_DIR:
         asset_path = STATIC_DIR / asset_dir
         if asset_path.exists():
             app.mount(f"/{asset_dir}", StaticFiles(directory=asset_path), name=f"static_{asset_dir}")
-            logger.info("✅ Mounted %s from: {asset_path}", asset_dir)
+            logger.info("✅ Mounted %s from: %s", asset_dir, asset_path)
 
     # Mount additional static files
     static_files = ["images", "icons", "fonts", "manifest.json", "robots.txt"]
@@ -392,16 +392,18 @@ if STATIC_DIR:
                 # Individual files are served by the SPA handler
                 continue
             app.mount(f"/{static_item}", StaticFiles(directory=static_path), name=f"static_{static_item}")
-            logger.info("✅ Mounted %s from: {static_path}", static_item)
+            logger.info("✅ Mounted %s from: %s", static_item, static_path)
 
     # Special handling for common favicon files
     favicon_files = ["favicon.ico", "favicon.png", "apple-touch-icon.png"]
     for favicon in favicon_files:
         favicon_path = STATIC_DIR / favicon
         if favicon_path.exists():
-            @app.get(f"/{favicon}", include_in_schema=False)
-            async def serve_favicon():
-                return FileResponse(favicon_path)
+            # Register route with a captured default argument to avoid late-binding closure issue
+            async def _serve_favicon(request: Request, _path=favicon_path):
+                return FileResponse(_path)
+
+            app.add_api_route(f"/{favicon}", _serve_favicon, methods=["GET"], include_in_schema=False)
 
 else:
     logger.warning("⚠️ No frontend build directory found. Checked: %s", [str(d) for d in STATIC_DIRS])
@@ -422,7 +424,7 @@ async def serve_spa(request: Request, full_path: str):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"API endpoint not found: /{full_path}"
-        ) from e
+        )
 
     # Look for index.html in the static directory
     if STATIC_DIR:
@@ -484,7 +486,7 @@ async def custom_404_handler(request: Request, exc: HTTPException):
 @app.exception_handler(500)
 async def custom_500_handler(request: Request, exc):
     """Enhanced 500 error handler."""
-    logger.error("Internal server error on %s: {exc}", request.url)
+    logger.error("Internal server error on %s: %s", request.url, exc)
     return JSONResponse(
         status_code=500,
         content={
