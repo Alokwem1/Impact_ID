@@ -1,15 +1,15 @@
 import { useState, useCallback } from 'react';
+import PropTypes from 'prop-types';
 import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryKeys';
 import { Link } from 'react-router-dom';
 import {
     ClockIcon,
     CheckCircleIcon,
     XCircleIcon,
-    ExclamationCircleIcon,
     FunnelIcon,
     MagnifyingGlassIcon,
     EyeIcon,
-    StarIcon,
     BoltIcon,
     SparklesIcon,
     TrophyIcon,
@@ -17,15 +17,13 @@ import {
     CalendarIcon,
     ArrowPathIcon,
     ChartBarIcon,
-    AcademicCapIcon,
     TagIcon,
     ChatBubbleBottomCenterTextIcon
 } from '@heroicons/react/24/outline';
 import {
     CheckCircleIcon as CheckCircleIconSolid,
     XCircleIcon as XCircleIconSolid,
-    ExclamationCircleIcon as ExclamationCircleIconSolid,
-    StarIcon as StarIconSolid
+    ExclamationCircleIcon as ExclamationCircleIconSolid
 } from '@heroicons/react/24/solid';
 import apiClient from '../api/axios';
 import Layout from '../tasks/Layout';
@@ -34,7 +32,7 @@ import Layout from '../tasks/Layout';
 const StatusBadge = ({ status, score, showScore = false }) => {
     const baseClasses = "inline-flex items-center space-x-1 text-xs font-medium px-3 py-1 rounded-full";
     let specificClasses = "";
-    let Icon = ClockIcon;
+    let Icon;
 
     switch (status) {
         case "approved":
@@ -79,6 +77,24 @@ const fetchSubmissions = async (filters) => {
     return data;
 };
 
+// Loading skeleton component - moved outside for performance
+const LoadingSkeleton = () => (
+    <div className="space-y-4">
+        {[1, 2, 3, 4, 5].map(i => (
+            <div key={`skeleton-${i}`} className="bg-white rounded-xl p-6 shadow-sm animate-pulse">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="flex-1">
+                        <div className="h-5 bg-gray-300 rounded w-3/4 mb-2"></div>
+                        <div className="h-4 bg-gray-300 rounded w-1/2"></div>
+                    </div>
+                    <div className="h-6 w-20 bg-gray-300 rounded-full"></div>
+                </div>
+                <div className="h-16 bg-gray-300 rounded"></div>
+            </div>
+        ))}
+    </div>
+);
+
 export default function SubmissionHistoryPage() {
     const [filters, setFilters] = useState({
         status: '',
@@ -97,7 +113,7 @@ export default function SubmissionHistoryPage() {
         refetch,
         isFetching 
     } = useQuery({
-        queryKey: ['submissions', filters],
+        queryKey: queryKeys.submissions.list(filters),
         queryFn: () => fetchSubmissions(filters),
         staleTime: 5 * 60 * 1000, // 5 minutes
     });
@@ -152,31 +168,6 @@ export default function SubmissionHistoryPage() {
         if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
         return submissionDate.toLocaleDateString();
     };
-
-    const getRewardText = (submission) => {
-        const rewards = [];
-        if (submission.xp_awarded > 0) rewards.push(`${submission.xp_awarded} XP`);
-        if (submission.essence_awarded > 0) rewards.push(`${submission.essence_awarded} Essence`);
-        return rewards.length > 0 ? rewards.join(', ') : null;
-    };
-
-    // Loading skeleton
-    const LoadingSkeleton = () => (
-        <div className="space-y-4">
-            {[1, 2, 3, 4, 5].map(i => (
-                <div key={i} className="bg-white rounded-xl p-6 shadow-sm animate-pulse">
-                    <div className="flex justify-between items-start mb-4">
-                        <div className="flex-1">
-                            <div className="h-5 bg-gray-300 rounded w-3/4 mb-2"></div>
-                            <div className="h-4 bg-gray-300 rounded w-1/2"></div>
-                        </div>
-                        <div className="h-6 w-20 bg-gray-300 rounded-full"></div>
-                    </div>
-                    <div className="h-16 bg-gray-300 rounded"></div>
-                </div>
-            ))}
-        </div>
-    );
 
     const renderContent = () => {
         if (isLoading && !submissions) {
@@ -339,7 +330,7 @@ export default function SubmissionHistoryPage() {
                                     <h4 className="text-sm font-medium text-gray-700 mb-2">Attachments:</h4>
                                     <div className="flex flex-wrap gap-2">
                                         {submission.attachments.map((attachment, index) => (
-                                            <span key={index} className="inline-flex items-center px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs">
+                                            <span key={`attachment-${submission.id}-${index}`} className="inline-flex items-center px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs">
                                                 <DocumentTextIcon className="h-3 w-3 mr-1" />
                                                 {attachment}
                                             </span>
@@ -496,10 +487,11 @@ export default function SubmissionHistoryPage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {/* Status Filter */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-2">
                                     Status
                                 </label>
                                 <select
+                                    id="status-filter"
                                     value={filters.status}
                                     onChange={(e) => handleFilterChange('status', e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -514,10 +506,11 @@ export default function SubmissionHistoryPage() {
 
                             {/* Limit Filter */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <label htmlFor="limit-filter" className="block text-sm font-medium text-gray-700 mb-2">
                                     Show
                                 </label>
                                 <select
+                                    id="limit-filter"
                                     value={filters.limit}
                                     onChange={(e) => handleFilterChange('limit', parseInt(e.target.value))}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -583,3 +576,10 @@ export default function SubmissionHistoryPage() {
         </Layout>
     );
 }
+
+// PropTypes for StatusBadge component
+StatusBadge.propTypes = {
+    status: PropTypes.string.isRequired,
+    score: PropTypes.number,
+    showScore: PropTypes.bool
+};

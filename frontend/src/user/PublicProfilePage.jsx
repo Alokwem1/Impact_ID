@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { queryKeys } from '../api/queryKeys';
 import { useQuery } from '@tanstack/react-query';
 import { 
     UserIcon,
@@ -335,7 +336,7 @@ export default function PublicProfilePage() {
         error: profileErrorMessage,
         refetch: refetchProfile 
     } = useQuery({
-        queryKey: ['publicProfile', username],
+        queryKey: queryKeys.public.profile(username),
         queryFn: () => fetchPublicProfile(username),
         enabled: !!username,
         staleTime: 2 * 60 * 1000, // 2 minutes
@@ -350,7 +351,7 @@ export default function PublicProfilePage() {
         data: activities = [], 
         isLoading: activitiesLoading 
     } = useQuery({
-        queryKey: ['userActivities', username],
+        queryKey: queryKeys.activities.user(username),
         queryFn: () => fetchUserActivities(username),
         enabled: !!username && !!profile && activeTab === 'activities',
         staleTime: 1 * 60 * 1000, // 1 minute

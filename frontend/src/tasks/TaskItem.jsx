@@ -28,6 +28,7 @@ import {
     FireIcon as FireIconSolid
 } from '@heroicons/react/24/solid';
 import apiClient from '../api/axios';
+import { queryKeys } from '../api/queryKeys';
 import toast from 'react-hot-toast';
 
 // Task type configurations
@@ -159,10 +160,10 @@ export default function TaskItem({ task, viewMode = 'grid' }) {
             }
             
             // Invalidate queries to update UI
-            queryClient.invalidateQueries({ queryKey: ['tasks'] });
-            queryClient.invalidateQueries({ queryKey: ['user_profile'] });
-            queryClient.invalidateQueries({ queryKey: ['user_badges'] });
-            queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.badges(task.user_id || task.owner_id) });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
         },
         onError: (err) => {
             console.error('Task submission error:', err);
@@ -286,12 +287,13 @@ export default function TaskItem({ task, viewMode = 'grid' }) {
         if (isCompleted()) return null;
 
         switch (task.type) {
-            case 'quiz':
+            case 'quiz': {
                 if (!task.quiz_question) return null;
-                
+
                 // Handle both array and object options from your backend
-                const options = Array.isArray(task.quiz_question.options) 
-                    ? task.quiz_question.options 
+                let options = [];
+                options = Array.isArray(task.quiz_question.options)
+                    ? task.quiz_question.options
                     : task.quiz_question.options?.choices || [];
                     
                 return (
@@ -316,8 +318,9 @@ export default function TaskItem({ task, viewMode = 'grid' }) {
                                 </label>
                             ))}
                         </div>
-                    </div>
+            </div>
                 );
+        }
 
             case 'upload':
                 return (

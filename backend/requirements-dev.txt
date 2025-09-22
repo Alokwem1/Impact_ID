@@ -1,0 +1,9 @@
+# Development / CI only dependencies
+-r requirements.txt
+pytest-cov==5.0.0
+
+# (Optional future) mypy, ruff, bandit, safety
+# mypy==1.11.2
+# ruff==0.6.3
+# bandit==1.7.9
+# safety==3.2.4

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     SparklesIcon,
@@ -27,6 +27,7 @@ import {
     ExclamationTriangleIcon as ExclamationTriangleIconSolid
 } from '@heroicons/react/24/solid';
 import apiClient from '../api/axios';
+import { queryKeys } from '../api/queryKeys';
 import Layout from '../tasks/Layout';
 import LoomView from '../features/LoomView';
 import WeavingView from '../features/WeavingView';
@@ -226,7 +227,7 @@ export default function WeavingLoomPage() {
         error: statusErrorMessage,
         refetch: refetchStatus 
     } = useQuery({
-        queryKey: ['weavingStatus'],
+        queryKey: queryKeys.weaving.status(),
         queryFn: fetchWeavingStatus,
         refetchInterval: autoRefresh ? 30000 : false,
         staleTime: 10000,
@@ -244,7 +245,7 @@ export default function WeavingLoomPage() {
         refetch: refetchThreads,
         isFetching: threadsFetching 
     } = useQuery({
-        queryKey: ['availableThreads', selectedCategory, qualityFilter],
+        queryKey: [ ...queryKeys.weaving.availableThreads(), selectedCategory, qualityFilter ],
         queryFn: () => fetchAvailableThreads({ 
             category: selectedCategory, 
             limit: 10,
@@ -259,7 +260,7 @@ export default function WeavingLoomPage() {
 
     // 3. Enhanced user profile fetching
     const { data: userProfile, isLoading: profileLoading } = useQuery({
-        queryKey: ['userProfile'],
+        queryKey: queryKeys.user.me(),
         queryFn: fetchUserProfile,
         staleTime: 5 * 60 * 1000,
         retry: 2
@@ -267,7 +268,7 @@ export default function WeavingLoomPage() {
 
     // 4. Enhanced leaderboard fetching
     const { data: leaderboard = [], isLoading: leaderboardLoading } = useQuery({
-        queryKey: ['weavingLeaderboard', leaderboardPeriod],
+        queryKey: [ ...queryKeys.weaving.leaderboard(), leaderboardPeriod ],
         queryFn: () => fetchWeavingLeaderboard({ period: leaderboardPeriod, limit: 20 }),
         staleTime: 5 * 60 * 1000,
         retry: 2
@@ -275,7 +276,7 @@ export default function WeavingLoomPage() {
 
     // 5. Weaving analytics fetching
     const { data: analytics } = useQuery({
-        queryKey: ['weavingAnalytics'],
+        queryKey: queryKeys.weaving.analytics(),
         queryFn: fetchWeavingAnalytics,
         staleTime: 10 * 60 * 1000,
         enabled: viewMode === 'analytics'
@@ -380,12 +381,12 @@ export default function WeavingLoomPage() {
             }
 
             // Comprehensive data invalidation
-            queryClient.invalidateQueries({ queryKey: ['weavingStatus'] });
-            queryClient.invalidateQueries({ queryKey: ['userProfile'] });
-            queryClient.invalidateQueries({ queryKey: ['availableThreads'] });
-            queryClient.invalidateQueries({ queryKey: ['weavingLeaderboard'] });
-            queryClient.invalidateQueries({ queryKey: ['weavingAnalytics'] });
-            queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.weaving.status() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.weaving.availableThreads() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.weaving.leaderboard() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.weaving.analytics() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
             
             // Track completion analytics
             if (window.gtag) {
@@ -530,6 +531,7 @@ export default function WeavingLoomPage() {
                         userStats={userStats}
                         showAdvanced={showAdvancedMode}
                         estimatedReward={WEAVING_MODES[showAdvancedMode ? 'advanced' : 'quick'].baseReward}
+                        onToggleAdvanced={(next) => setShowAdvancedMode(!!next)}
                         categories={WEAVING_CATEGORIES}
                         onBack={() => setViewMode('loom')}
                     />

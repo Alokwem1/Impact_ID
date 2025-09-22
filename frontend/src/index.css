@@ -305,23 +305,8 @@ body {
   box-shadow: 0 0 0 2px var(--color-brand-green);
 }
 
-.streak-indicator {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  background-color: #fed7aa;
-  color: #9a3412;
-  animation: streakFire 1s ease-in-out infinite;
-}
-
-.dark .streak-indicator {
-  background-color: rgba(154, 52, 18, 0.3);
-  color: #fdba74;
-}
-
+/* streak-indicator defined in Gamification section */
+ 
 .btn-danger {
   display: inline-flex;
   align-items: center;
@@ -746,25 +731,18 @@ body {
   height: 12px; /* adjust to taste */
   overflow: hidden;
 }
-.xp-progress-fill {
-  width: var(--progress-width, 50%); /* set via JS or inline style: --progress-width: 75% */
-  height: 100%;
-  background: linear-gradient(to right, var(--color-xp), var(--color-essence));
-  border-radius: 9999px;
-  transition: width 1s ease-out;
-  position: relative;
-  overflow: hidden;
-}
+/* xp-progress-fill defined below, keep single source of truth */
 
 .dark .xp-progress-bar {
   background-color: #374151;
 }
 
 .xp-progress-fill {
+  width: var(--progress-width, 50%);
   height: 100%;
   background: linear-gradient(to right, var(--color-xp), var(--color-essence));
   border-radius: 9999px;
-  transition: all 1000ms ease-out;
+  transition: width 1s ease-out;
   position: relative;
   overflow: hidden;
 }
@@ -792,42 +770,11 @@ body {
   animation: streakFire 1s ease-in-out infinite;
 }
 
+/* dark streak-indicator */
 .dark .streak-indicator {
   background-color: rgba(154, 52, 18, 0.3);
   color: #fdba74;
 }
-.dark .streak-indicator {
-  background-color: rgba(154, 52, 18, 0.3);
-  color: #fdba74;
-}
-  content {
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
-  animation: shimmer 2s infinite;
-}
-
-/* Streak System */
-.streak-indicator {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  background-color: #fed7aa;
-  color: #9a3412;
-  animation: streakFire 1s ease-in-out infinite;
-}
-
-.dark .streak-indicator {
-  background-color: rgba(154, 52, 18, 0.3);
-  color: #fdba74;
-}
-
 .streak-fire {
   color: #f97316;
   animation: streakFire 1s ease-in-out infinite;
@@ -867,9 +814,11 @@ body {
   perspective: 1000px;
 }
 
+/* hover styles + optional animation combined */
 .badge-item:hover {
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   transform: translateY(-4px);
+  animation: bounceGentle 2s infinite;
 }
 
 .dark .badge-item {
@@ -877,9 +826,7 @@ body {
   border-color: #374151;
 }
 
-.badge-item:hover {
-  animation: bounceGentle 2s infinite;
-}
+/* removed duplicate .badge-item:hover */
 
 .badge-glow {
   animation: badgeGlow 2s ease-in-out infinite;
@@ -915,17 +862,15 @@ body {
   border-color: #374151;
 }
 
+/* consolidated hover styles */
 .leaderboard-item:hover {
   border-color: #d1d5db;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  transform: scale(1.02);
 }
 
 .dark .leaderboard-item:hover {
   border-color: #4b5563;
-}
-
-.leaderboard-item:hover {
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  transform: scale(1.02);
 }
 
 .rank-badge {
@@ -1265,7 +1210,6 @@ body {
     padding-bottom: 0.75rem;
   }
   
-  @media (hover: none) and (pointer: coarse) {
   .card-hover:active,
   .card-interactive:active {
     transform: scale(0.95);
@@ -1560,4 +1504,4 @@ body {
   50% {
     transform: translateY(-10px);
   }
-}git add .
+}

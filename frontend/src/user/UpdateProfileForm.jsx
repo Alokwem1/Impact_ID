@@ -18,6 +18,7 @@ import {
     KeyIcon
 } from '@heroicons/react/24/outline';
 import apiClient from '../api/axios';
+import { queryKeys } from '../api/queryKeys';
 import toast from 'react-hot-toast';
 import { useAuth } from '../utils/AuthContext';
 
@@ -88,7 +89,7 @@ const validateSocialLink = (platform, value) => {
         twitter: /^@?[\w]+$/,
         linkedin: /^(https?:\/\/)?(www\.)?linkedin\.com\/in\/[\w-]+\/?$|^[\w-]+$/,
         github: /^(https?:\/\/)?(www\.)?github\.com\/[\w-]+\/?$|^[\w-]+$/,
-        instagram: /^@?[\w\.]+$/
+        instagram: /^@?[\w.]+$/
     };
     
     return patterns[platform] ? patterns[platform].test(value) : true;
@@ -239,8 +240,10 @@ export default function UpdateProfileForm() {
                 duration: 3000
             });
             if (refreshUser) refreshUser();
-            queryClient.invalidateQueries({ queryKey: ['user_profile'] });
-            queryClient.invalidateQueries({ queryKey: ['publicProfile', user?.username] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+            if (user?.username) {
+                queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(user.username) });
+            }
             setErrors({});
         },
         onError: (err) => {
@@ -287,7 +290,7 @@ export default function UpdateProfileForm() {
             });
             if (refreshUser) refreshUser();
             setAvatarPreview(null);
-            queryClient.invalidateQueries({ queryKey: ['user_profile'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
         },
         onError: (err) => {
             console.error('Avatar upload error:', err);

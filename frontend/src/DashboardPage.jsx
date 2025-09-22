@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from './api/queryKeys';
 import { Link } from 'react-router-dom';
 import {
     TrophyIcon,
@@ -312,7 +313,7 @@ const DailyGoals = ({ dashboardData }) => {
  */
 const RecentAchievements = () => {
     const { data: achievements, isLoading } = useQuery({
-        queryKey: ['recentAchievements'],
+        queryKey: queryKeys.achievements.recent(),
         queryFn: fetchRecentAchievements,
         onError: (error) => {
             console.error('Failed to fetch achievements:', error);
@@ -477,7 +478,7 @@ export default function DashboardPage() {
         error: dashboardError,
         refetch: refetchDashboard 
     } = useQuery({
-        queryKey: ['userDashboard'],
+        queryKey: queryKeys.user.dashboard(),
         queryFn: fetchDashboardData,
         enabled: !!user,
         refetchInterval: 60000, // Refresh every minute

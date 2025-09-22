@@ -16,6 +16,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app import models, database, auth, schemas
 from app.utils.email import send_email
+from app.utils.common import utcnow, ErrorMessages
 
 
 logger = logging.getLogger(__name__)
@@ -42,24 +43,24 @@ async def create_task(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Quiz tasks must have a correct answer."
-                ) from e
+                )
             if not task_data.quiz_question:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Quiz tasks must have a question."
-                ) from e
+                )
 
         if task_data.xp_reward < 1 or task_data.xp_reward > 1000:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="XP reward must be between 1 and 1000."
-            ) from e
+            )
 
         if task_data.essence_reward and (task_data.essence_reward < 0 or task_data.essence_reward > 100):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Essence reward must be between 0 and 100."
-            ) from e
+            )
 
         # ✅ CRITICAL FIX: Use correct field names from models
         new_task = models.Task(
@@ -82,7 +83,7 @@ async def create_task(
             prerequisites=task_data.prerequisites or [],
             active=True,
             created_by_user_id=current_user.id,  # ✅ FIXED: Correct field name
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
             completion_count=0,
             success_rate=0.0
         )
@@ -94,7 +95,9 @@ async def create_task(
         # Background task to notify users of new task
         background_tasks.add_task(_notify_users_new_task, new_task.id, new_task.title)
 
-        logger.info("New task created: %s (ID: {new_task.id}) by {current_user.username}", new_task.title)
+        logger.info(
+            "New task created: title=%s id=%s by=%s", new_task.title, new_task.id, current_user.username
+        )
         return new_task
 
     except HTTPException as e:
@@ -104,14 +107,14 @@ async def create_task(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Task with this title already exists."
-        ) from e
+        )
     except Exception as e:
         await db.rollback()
         logger.error("Task creation error: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task creation service temporarily unavailable"
-        ) from e
+        )
 
 @router.put("/{task_id}", response_model=schemas.TaskDetail)
 async def update_task(
@@ -128,34 +131,33 @@ async def update_task(
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found"
-            ) from e
+                detail=ErrorMessages.TASK_NOT_FOUND
+            )
 
         # Validate updates
         update_data = task_data.model_dump(exclude_unset=True)
 
         # Special validation for quiz updates
-        if getattr(update_data, "type", None) == 'quiz' or task.type == 'quiz':
+        if update_data.get("type") == 'quiz' or task.type == 'quiz':
             if 'quiz_question' in update_data and not update_data['quiz_question']:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Quiz tasks must have a question"
-                ) from e
+                )
             if 'correct_answer' in update_data and not update_data['correct_answer']:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Quiz tasks must have a correct answer"
-                ) from e
+                )
 
         # Update fields
         for field, value in update_data.items():
             setattr(task, field, value)
 
-        task.updated_at = datetime.utcnow()
+        task.updated_at = utcnow()
         await db.commit()
         await db.refresh(task)
-
-        logger.info("Task updated: %s (ID: {task.id}) by {current_user.username}", task.title)
+        logger.info("Task updated: title=%s id=%s by=%s", task.title, task.id, current_user.username)
         return task
 
     except HTTPException as e:
@@ -166,7 +168,7 @@ async def update_task(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task update service temporarily unavailable"
-        ) from e
+        )
 
 @router.delete("/{task_id}")
 async def delete_task(
@@ -182,15 +184,14 @@ async def delete_task(
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found"
-            ) from e
+                detail=ErrorMessages.TASK_NOT_FOUND
+            )
 
         # Soft delete
         task.active = False
-        task.updated_at = datetime.utcnow()
+        task.updated_at = utcnow()
         await db.commit()
-
-        logger.info("Task deleted: %s (ID: {task.id}) by {current_user.username}", task.title)
+        logger.info("Task deleted: title=%s id=%s by=%s", task.title, task.id, current_user.username)
         return {"message": "Task deleted successfully", "task_id": task_id}
 
     except HTTPException as e:
@@ -201,7 +202,7 @@ async def delete_task(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task deletion service temporarily unavailable"
-        ) from e
+        )
 
 @router.post("/review/{submission_id}", response_model=schemas.AdminSubmissionOut)
 async def review_submission(
@@ -228,19 +229,20 @@ async def review_submission(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Submission not found"
-            ) from e
+            )
 
         if submission.status != "pending":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Submission has already been reviewed"
-            ) from e
+            )
 
         # Update submission
         submission.status = "approved" if review_data.approve else "rejected"
-        submission.reviewed_at = datetime.utcnow()
+        submission.reviewed_at = utcnow()
         submission.reviewed_by_user_id = current_user.id
-        submission.feedback = review_data.notes
+        # Store reviewer feedback (schema field is 'feedback')
+        submission.feedback = review_data.feedback
 
         if review_data.approve:
             # Award XP and essence
@@ -263,12 +265,14 @@ async def review_submission(
                 submission.user.email,
                 submission.user.username,
                 submission.task.title,
-                review_data.notes
+                review_data.feedback
             )
 
         await db.commit()
 
-        logger.info("Submission reviewed: %s - {submission.status} by {current_user.username}", submission.id)
+        logger.info(
+            "Submission reviewed: id=%s status=%s by=%s", submission.id, submission.status, current_user.username
+        )
 
         return schemas.AdminSubmissionOut(
             id=submission.id,
@@ -276,12 +280,19 @@ async def review_submission(
             task_title=submission.task.title,
             user_id=submission.user_id,
             username=submission.user.username,
-            response=submission.response,
-            submitted_at=submission.submitted_at,
+            user_email=submission.user.email,
+            response=submission.response or "",
+            attachments=submission.attachments or [],
             status=submission.status,
+            submitted_at=submission.submitted_at,
             reviewed_at=submission.reviewed_at,
-            reviewed_by=current_user.id,
-            review_notes=submission.feedback
+            reviewed_by=current_user.username,
+            feedback=submission.feedback,
+            score=submission.score,
+            xp_awarded=submission.xp_awarded,
+            essence_awarded=submission.essence_awarded,
+            attempt_number=submission.attempt_number,
+            time_spent_minutes=submission.time_spent_minutes
         )
 
     except HTTPException as e:
@@ -292,13 +303,13 @@ async def review_submission(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Submission review service temporarily unavailable"
-        ) from e
+        )
 
 # ========================
 # 👥 User: Task Interaction
 # ========================
 
-@router.get("/", response_model=List[schemas.TaskDetail])
+@router.get("/", response_model=schemas.PaginatedResponse)
 async def get_task_feed(
     category: Optional[str] = Query(None, description="Filter by category"),
     difficulty: Optional[str] = Query(None, description="Filter by difficulty level"),
@@ -330,12 +341,30 @@ async def get_task_feed(
             desc(models.Task.created_at)
         ).offset(offset).limit(limit)
 
+        # Count total (without pagination)
+        count_stmt = select(func.count()).select_from(models.Task).where(models.Task.active.is_(True))
+        if category:
+            count_stmt = count_stmt.where(models.Task.category == category)
+        if difficulty:
+            count_stmt = count_stmt.where(models.Task.difficulty == difficulty)
+        if featured is not None:
+            count_stmt = count_stmt.where(models.Task.is_featured == featured)
+        total_result = await db.execute(count_stmt)
+        total = total_result.scalar() or 0
+
         result = await db.execute(stmt)
         tasks = result.scalars().all()
 
         if not current_user:
             # Return basic task info for anonymous users
-            return [schemas.TaskDetail.model_validate(task) for task in tasks]
+            items = [schemas.TaskDetail.model_validate(task) for task in tasks]
+            return schemas.PaginatedResponse(
+                items=items,
+                total=total,
+                limit=limit,
+                offset=offset,
+                has_more=offset + len(items) < total
+            )
 
         # ✅ CRITICAL FIX: Use TaskSubmission instead of TaskLog
         # Get user submissions for progress tracking
@@ -371,14 +400,96 @@ async def get_task_feed(
                 detail.user_best_score = getattr(submission_data, "score", None)
             task_details.append(detail)
 
-        return task_details
+        return schemas.PaginatedResponse(
+            items=task_details,
+            total=total,
+            limit=limit,
+            offset=offset,
+            has_more=offset + len(task_details) < total
+        )
 
     except Exception as e:
         logger.error("Task feed error: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task feed service temporarily unavailable"
-        ) from e
+        )
+
+@router.get("/categories", response_model=List[str])
+async def get_task_categories(db: AsyncSession = Depends(database.get_db)):
+    """
+    📂 Get all available task categories.
+    """
+    try:
+        stmt = select(models.Task.category).distinct().where(
+            and_(
+                models.Task.active.is_(True),
+                models.Task.category.isnot(None)
+            )
+        )
+        result = await db.execute(stmt)
+        categories = [cat for cat in result.scalars().all() if cat]
+        return sorted(categories)
+
+    except Exception as e:
+        logger.error("Get categories error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Categories service temporarily unavailable"
+        )
+
+@router.get("/my-submissions", response_model=List[schemas.UserSubmissionOut])
+async def get_my_submissions(
+    status: Optional[str] = Query(None, description="Filter by submission status"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user_async),
+):
+    """
+    📋 Get current user's task submissions with enhanced filtering.
+    """
+    try:
+        stmt = select(models.TaskSubmission).options(
+            joinedload(models.TaskSubmission.task)
+        ).where(models.TaskSubmission.user_id == current_user.id)
+
+        if status:
+            stmt = stmt.where(models.TaskSubmission.status == status)
+
+        stmt = stmt.order_by(
+            desc(models.TaskSubmission.submitted_at)
+        ).offset(offset).limit(limit)
+
+        result = await db.execute(stmt)
+        submissions = result.scalars().all()
+
+        return [
+            schemas.UserSubmissionOut(
+                id=sub.id,
+                task_id=sub.task_id,
+                task_title=sub.task.title,
+                response=sub.response,
+                attachments=sub.attachments or [],
+                status=sub.status,
+                score=sub.score,
+                submitted_at=sub.submitted_at,
+                reviewed_at=sub.reviewed_at,
+                feedback=sub.feedback,
+                xp_awarded=sub.xp_awarded or 0,
+                essence_awarded=sub.essence_awarded or 0,
+                attempt_number=sub.attempt_number,
+                time_spent_minutes=sub.time_spent_minutes
+            )
+            for sub in submissions
+        ]
+
+    except Exception as e:
+        logger.error("Get user submissions error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Submissions service temporarily unavailable"
+        )
 
 @router.get("/{task_id}", response_model=schemas.TaskOut)
 async def get_task(
@@ -400,14 +511,14 @@ async def get_task(
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Task not found"
-            ) from e
+                detail=ErrorMessages.TASK_NOT_FOUND
+            )
 
         if not task.active:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Task is no longer available"
-            ) from e
+            )
 
         # Add user submission status if authenticated
         if current_user:
@@ -436,7 +547,127 @@ async def get_task(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task service temporarily unavailable"
-        ) from e
+        )
+
+async def _validate_task_exists(task_id: int, db: AsyncSession) -> models.Task:
+    """Validate task exists and is active"""
+    task = await db.get(models.Task, task_id)
+    if not task or not task.active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found or is inactive"
+        )
+    return task
+
+async def _check_existing_submission(user_id: int, task_id: int, db: AsyncSession):
+    """Check if user has already submitted this task"""
+    existing_stmt = select(models.TaskSubmission).where(
+        and_(
+            models.TaskSubmission.user_id == user_id,
+            models.TaskSubmission.task_id == task_id
+        )
+    )
+    existing_result = await db.execute(existing_stmt)
+    existing_submission = existing_result.scalars().first()
+    
+    if existing_submission:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You have already submitted this task"
+        )
+
+def _validate_submission_response(submission: schemas.TaskSubmission):
+    """Validate submission response meets requirements"""
+    if not submission.response or len(submission.response.strip()) < 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Response must be at least 5 characters long"
+        )
+
+def _validate_time_limit(task: models.Task, submission: schemas.TaskSubmission):
+    """Validate submission doesn't exceed time limit"""
+    if task.time_limit_minutes and submission.time_spent_minutes:
+        if submission.time_spent_minutes > task.time_limit_minutes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Submission exceeds time limit of {task.time_limit_minutes} minutes"
+            )
+
+def _determine_submission_status(task: models.Task, submission: schemas.TaskSubmission) -> tuple[str, bool, float]:
+    """Determine submission status, auto-approval, and score"""
+    submission_status = "pending"
+    auto_approved = False
+    score = None
+
+    if task.type == "quiz" and task.correct_answer:
+        is_correct = submission.response.strip().lower() == task.correct_answer.strip().lower()
+        submission_status = "approved" if is_correct else "rejected"
+        auto_approved = is_correct
+        score = 100.0 if is_correct else 0.0
+
+    return submission_status, auto_approved, score
+
+def _create_task_submission(
+    user_id: int, 
+    task: models.Task, 
+    submission: schemas.TaskSubmission, 
+    status: str, 
+    score: float, 
+    auto_approved: bool
+) -> models.TaskSubmission:
+    """Create new task submission record"""
+    new_submission = models.TaskSubmission(
+        user_id=user_id,
+        task_id=task.id,
+        response=submission.response,
+        attachments=submission.attachments or [],
+        status=status,
+        score=score,
+        submitted_at=utcnow(),
+        time_spent_minutes=submission.time_spent_minutes,
+        attempt_number=1
+    )
+
+    if auto_approved:
+        new_submission.xp_awarded = task.xp_reward
+        new_submission.essence_awarded = getattr(task, 'essence_reward', 0)
+
+    return new_submission
+
+def _update_task_statistics(task: models.Task, auto_approved: bool):
+    """Update task completion statistics"""
+    task.completion_count += 1
+    if auto_approved:
+        total_submissions = task.completion_count
+        task.success_rate = ((task.success_rate * (total_submissions - 1)) + (100 if auto_approved else 0)) / total_submissions
+
+def _prepare_submission_response(
+    submission: models.TaskSubmission, 
+    task: models.Task, 
+    user: models.User, 
+    auto_approved: bool, 
+    status: str
+) -> schemas.TaskSubmissionResponse:
+    """Prepare the API response for submission"""
+    response_data = schemas.TaskSubmissionResponse(
+        submission_id=submission.id,
+        status=status,
+        submitted_at=submission.submitted_at,
+        auto_approved=auto_approved,
+        # Provide initial message to satisfy non-optional field requirement
+        message=("Correct! XP and points awarded." if auto_approved else "Submission received and is pending review.")
+    )
+
+    if auto_approved:
+        response_data.message = "Correct! XP and points awarded."
+        response_data.xp_earned = task.xp_reward
+        response_data.essence_earned = getattr(task, 'essence_reward', 0)
+        response_data.new_xp_total = user.xp
+        response_data.new_essence_total = user.essence_balance
+    else:
+        response_data.message = "Submission received and is pending review."
+
+    return response_data
 
 @router.post("/{task_id}/submit", response_model=schemas.TaskSubmissionResponse)
 async def submit_task(
@@ -456,7 +687,7 @@ async def submit_task(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Task not found or is inactive"
-            ) from e
+            )
 
         # ✅ CRITICAL FIX: Use TaskSubmission instead of TaskLog
         # Check for existing submission
@@ -473,14 +704,14 @@ async def submit_task(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="You have already submitted this task"
-            ) from e
+            )
 
         # Enhanced validation
         if not submission.response or len(submission.response.strip()) < 5:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Response must be at least 5 characters long"
-            ) from e
+            )
 
         # Check time limit if specified
         if task.time_limit_minutes and submission.time_spent_minutes:
@@ -488,7 +719,7 @@ async def submit_task(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Submission exceeds time limit of {task.time_limit_minutes} minutes"
-                ) from e
+                )
 
         # Determine submission status and score
         submission_status = "pending"
@@ -510,7 +741,7 @@ async def submit_task(
             attachments=submission.attachments or [],
             status=submission_status,
             score=score,
-            submitted_at=datetime.utcnow(),
+            submitted_at=utcnow(),
             time_spent_minutes=submission.time_spent_minutes,
             attempt_number=1  # Could implement multiple attempts
         )
@@ -551,14 +782,17 @@ async def submit_task(
                 task.title
             )
 
-        logger.info("Task submission: %s by {current_user.username} - {submission_status}", task.title)
+        logger.info(
+            "Task submission: task=%s user=%s status=%s", task.title, current_user.username, submission_status
+        )
 
         # Prepare response
         response_data = schemas.TaskSubmissionResponse(
             submission_id=new_submission.id,
             status=submission_status,
             submitted_at=new_submission.submitted_at,
-            auto_approved=auto_approved
+            auto_approved=auto_approved,
+            message=("Correct! XP and points awarded." if auto_approved else "Submission received and is pending review.")
         )
 
         if auto_approved:
@@ -580,81 +814,7 @@ async def submit_task(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task submission service temporarily unavailable"
-        ) from e
-
-@router.get("/categories", response_model=List[str])
-async def get_task_categories(db: AsyncSession = Depends(database.get_db)):
-    """
-    📂 Get all available task categories.
-    """
-    try:
-        stmt = select(models.Task.category).distinct().where(
-            and_(
-                models.Task.active.is_(True),
-                models.Task.category.isnot(None)
-            )
         )
-        result = await db.execute(stmt)
-        categories = [cat for cat in result.scalars().all() if cat]
-        return sorted(categories)
-
-    except Exception as e:
-        logger.error("Get categories error: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Categories service temporarily unavailable"
-        ) from e
-
-@router.get("/my-submissions", response_model=List[schemas.UserSubmissionOut])
-async def get_my_submissions(
-    status: Optional[str] = Query(None, description="Filter by submission status"),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(database.get_db),
-    current_user: models.User = Depends(auth.get_current_user_async),
-):
-    """
-    📋 Get current user's task submissions with enhanced filtering.
-    """
-    try:
-        # ✅ CRITICAL FIX: Use TaskSubmission instead of TaskLog
-        stmt = select(models.TaskSubmission).options(
-            joinedload(models.TaskSubmission.task)
-        ).where(models.TaskSubmission.user_id == current_user.id)
-
-        if status:
-            stmt = stmt.where(models.TaskSubmission.status == status)
-
-        stmt = stmt.order_by(
-            desc(models.TaskSubmission.submitted_at)
-        ).offset(offset).limit(limit)
-
-        result = await db.execute(stmt)
-        submissions = result.scalars().all()
-
-        return [
-            schemas.UserSubmissionOut(
-                id=sub.id,
-                task_id=sub.task_id,
-                task_title=sub.task.title,
-                response=sub.response,
-                status=sub.status,
-                score=sub.score,
-                submitted_at=sub.submitted_at,
-                reviewed_at=sub.reviewed_at,
-                feedback=sub.feedback,
-                xp_awarded=sub.xp_awarded or 0,
-                essence_awarded=sub.essence_awarded or 0
-            )
-            for sub in submissions
-        ]
-
-    except Exception as e:
-        logger.error("Get user submissions error: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Submissions service temporarily unavailable"
-        ) from e
 
 # ========================
 # 📊 Analytics & Statistics
@@ -705,7 +865,7 @@ async def get_task_statistics(
             "total_submissions": total_submissions,
             "pending_submissions": pending_submissions,
             "popular_categories": popular_categories,
-            "generated_at": datetime.utcnow()
+            "generated_at": utcnow()
         }
 
     except Exception as e:
@@ -713,7 +873,7 @@ async def get_task_statistics(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Statistics service temporarily unavailable"
-        ) from e
+        )
 
 # ========================
 # ⚙️ Internal Helper Functions
@@ -753,7 +913,7 @@ async def _award_points_and_xp(user: models.User, task: models.Task, db: AsyncSe
             username=user.username,
             action="completed_task",
             detail=f"Completed '{task.title}' (+{task.xp_reward} XP)",
-            created_at=datetime.utcnow()
+            created_at=utcnow()
         )
         db.add(activity)
 
@@ -832,7 +992,7 @@ async def _try_award_badges(user: models.User, db: AsyncSession):
                 user_badge = models.UserBadge(
                     user_id=user.id,
                     badge_id=badge.id,
-                    awarded_at=datetime.utcnow()
+                    awarded_at=utcnow()
                 )
                 db.add(user_badge)
 
@@ -842,11 +1002,11 @@ async def _try_award_badges(user: models.User, db: AsyncSession):
                     username=user.username,
                     action="earned_badge",
                     detail=badge.title,
-                    created_at=datetime.utcnow()
+                    created_at=utcnow()
                 )
                 db.add(activity)
 
-                logger.info("Badge awarded: %s to {user.username}", badge.title)
+                logger.info("Badge awarded: badge=%s user=%s", badge.title, user.username)
 
     except Exception as e:
         logger.error("Badge awarding error: %s", e)
@@ -856,7 +1016,7 @@ async def _try_award_badges(user: models.User, db: AsyncSession):
 # 📧 Background Tasks
 # ========================
 
-async def _notify_users_new_task(task_id: int, task_title: str):
+def _notify_users_new_task(task_id: int, task_title: str):
     """
     📢 Notify active users about new tasks (placeholder for full implementation).
     """
@@ -866,8 +1026,7 @@ async def _notify_users_new_task(task_id: int, task_title: str):
         # 2. Send push notifications
         # 3. Send email notifications
         # 4. Create in-app notifications
-        logger.info("New task notification: %s (ID: {task_id})", task_title)
-        pass
+        logger.info("New task notification: title=%s id=%s", task_title, task_id)
     except Exception as e:
         logger.error("New task notification error: %s", e)
 

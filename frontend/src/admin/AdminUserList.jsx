@@ -1,22 +1,21 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
+import PropTypes from 'prop-types';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryKeys';
 import { 
     UsersIcon,
     MagnifyingGlassIcon,
     FunnelIcon,
     ArrowPathIcon,
-    UserCircleIcon,
     ShieldCheckIcon,
     ShieldExclamationIcon,
     TrophyIcon,
     FireIcon,
     CalendarIcon,
-    EnvelopeIcon,
     ExclamationTriangleIcon,
     CheckCircleIcon,
     XMarkIcon,
     EyeIcon,
-    PencilIcon,
     TrashIcon,
     ClockIcon,
     DocumentArrowDownIcon,
@@ -203,10 +202,10 @@ const UserStatsCards = ({ stats, isLoading }) => {
     
     return (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            {statCards.map((stat, index) => {
+            {statCards.map((stat) => {
                 const Icon = stat.icon;
                 return (
-                    <div key={index} className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
+                    <div key={stat.label} className="bg-white p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
                         <div className="flex items-center">
                             <Icon className={`h-8 w-8 ${stat.color} mr-3`} />
                             <div>
@@ -307,35 +306,41 @@ const UserActivityModal = ({ user, activity, isLoading, onClose }) => (
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                         <span className="ml-3 text-gray-600">Loading activity...</span>
                     </div>
-                ) : activity && activity.length > 0 ? (
-                    <div className="space-y-3">
-                        {activity.map((item, index) => (
-                            <div key={index} className="flex items-start space-x-3 p-3 border-l-2 border-blue-200 bg-gray-50 rounded-r-lg">
-                                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                    <ClockIcon className="h-4 w-4 text-blue-600" />
-                                </div>
-                                <div className="flex-1">
-                                    <p className="text-sm font-medium text-gray-900">
-                                        {item.detail || item.action.replace(/_/g, ' ')}
-                                    </p>
-                                    <p className="text-xs text-gray-500">
-                                        {new Date(item.created_at).toLocaleString()}
-                                    </p>
-                                    {item.meta_data?.xp_gained && (
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 mt-1">
-                                            +{item.meta_data.xp_gained} XP
-                                        </span>
-                                    )}
-                                </div>
+                ) : (() => {
+                    if (activity && activity.length > 0) {
+                        return (
+                            <div className="space-y-3">
+                                {activity.map((item) => (
+                                    <div key={`${item.id || item.created_at}-${item.action}`} className="flex items-start space-x-3 p-3 border-l-2 border-blue-200 bg-gray-50 rounded-r-lg">
+                                        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                            <ClockIcon className="h-4 w-4 text-blue-600" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-sm font-medium text-gray-900">
+                                                {item.detail || item.action.replace(/_/g, ' ')}
+                                            </p>
+                                            <p className="text-xs text-gray-500">
+                                                {new Date(item.created_at).toLocaleString()}
+                                            </p>
+                                            {item.meta_data?.xp_gained && (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 mt-1">
+                                                    +{item.meta_data.xp_gained} XP
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
-                        ))}
-                    </div>
-                ) : (
-                    <div className="text-center py-8 text-gray-500">
-                        <ClockIcon className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-                        <p>No recent activity found</p>
-                    </div>
-                )}
+                        );
+                    }
+                    
+                    return (
+                        <div className="text-center py-8 text-gray-500">
+                            <ClockIcon className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                            <p>No recent activity found</p>
+                        </div>
+                    );
+                })()}
             </div>
         </div>
     </div>
@@ -387,7 +392,7 @@ export default function AdminUserList() {
         error,
         refetch 
     } = useQuery({
-        queryKey: ['adminUsers', filters, sortConfig],
+        queryKey: queryKeys.admin.usersList(filters, sortConfig),
         queryFn: () => fetchUsers({ 
             ...filters, 
             sort_by: sortConfig.field, 
@@ -406,7 +411,7 @@ export default function AdminUserList() {
         data: userStats, 
         isLoading: statsLoading 
     } = useQuery({
-        queryKey: ['adminUserStats'],
+        queryKey: queryKeys.admin.userStats(),
         queryFn: fetchUserStats,
         staleTime: 5 * 60 * 1000, // 5 minutes
         retry: 2
@@ -417,7 +422,7 @@ export default function AdminUserList() {
         data: userActivity, 
         isLoading: activityLoading 
     } = useQuery({
-        queryKey: ['userActivity', selectedUserActivity?.id],
+        queryKey: selectedUserActivity?.id ? queryKeys.activities.userId(selectedUserActivity.id) : ['activities','user-id',undefined],
         queryFn: () => fetchUserActivity(selectedUserActivity.id),
         enabled: !!selectedUserActivity,
         staleTime: 1 * 60 * 1000 // 1 minute
@@ -428,8 +433,8 @@ export default function AdminUserList() {
         mutationFn: updateUserStatus,
         onSuccess: (data, variables) => {
             toast.success(`User status updated to ${variables.status}`);
-            queryClient.invalidateQueries({ queryKey: ['adminUsers'] });
-            queryClient.invalidateQueries({ queryKey: ['adminUserStats'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.usersBase() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.userStats() });
             setIsModalOpen(false);
         },
         onError: (err) => {
@@ -442,7 +447,7 @@ export default function AdminUserList() {
         mutationFn: updateUserRole,
         onSuccess: (data, variables) => {
             toast.success(`User role updated to ${variables.role}`);
-            queryClient.invalidateQueries({ queryKey: ['adminUsers'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.usersBase() });
             setIsModalOpen(false);
         },
         onError: (err) => {
@@ -455,8 +460,8 @@ export default function AdminUserList() {
         mutationFn: deleteUser,
         onSuccess: () => {
             toast.success('User deleted successfully');
-            queryClient.invalidateQueries({ queryKey: ['adminUsers'] });
-            queryClient.invalidateQueries({ queryKey: ['adminUserStats'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.usersBase() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.userStats() });
             setIsModalOpen(false);
         },
         onError: (err) => {
@@ -480,7 +485,7 @@ export default function AdminUserList() {
         mutationFn: bulkUpdateStatus,
         onSuccess: (data, variables) => {
             toast.success(`${variables.userIds.length} users updated to ${variables.status}`);
-            queryClient.invalidateQueries({ queryKey: ['adminUsers'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.usersBase() });
             setSelectedUsers(new Set());
         },
         onError: (err) => {
@@ -685,9 +690,10 @@ export default function AdminUserList() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Search</label>
+                            <label htmlFor="search-input" className="block text-xs font-medium text-gray-700 mb-1">Search</label>
                             <div className="relative">
                                 <input
+                                    id="search-input"
                                     type="text"
                                     placeholder="Username or email..."
                                     value={filters.search}
@@ -698,8 +704,9 @@ export default function AdminUserList() {
                             </div>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+                            <label htmlFor="status-filter" className="block text-xs font-medium text-gray-700 mb-1">Status</label>
                             <select
+                                id="status-filter"
                                 value={filters.status}
                                 onChange={(e) => handleFilterChange('status', e.target.value)}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -712,8 +719,9 @@ export default function AdminUserList() {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Min XP</label>
+                            <label htmlFor="min-xp" className="block text-xs font-medium text-gray-700 mb-1">Min XP</label>
                             <input
+                                id="min-xp"
                                 type="number"
                                 placeholder="0"
                                 value={filters.min_xp || ''}
@@ -1068,8 +1076,9 @@ function ActionModal({ type, user, actionData, setActionData, onSubmit, onClose,
                 {type === 'status' && (
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">New Status</label>
+                            <label htmlFor="status-select" className="block text-sm font-medium text-gray-700 mb-1">New Status</label>
                             <select
+                                id="status-select"
                                 value={actionData.status}
                                 onChange={(e) => setActionData(prev => ({ ...prev, status: e.target.value }))}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -1081,8 +1090,9 @@ function ActionModal({ type, user, actionData, setActionData, onSubmit, onClose,
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+                            <label htmlFor="reason-textarea" className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
                             <textarea
+                                id="reason-textarea"
                                 value={actionData.reason}
                                 onChange={(e) => setActionData(prev => ({ ...prev, reason: e.target.value }))}
                                 rows={3}
@@ -1095,8 +1105,9 @@ function ActionModal({ type, user, actionData, setActionData, onSubmit, onClose,
                 
                 {type === 'role' && (
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">New Role</label>
+                        <label htmlFor="role-select" className="block text-sm font-medium text-gray-700 mb-1">New Role</label>
                         <select
+                            id="role-select"
                             value={actionData.role}
                             onChange={(e) => setActionData(prev => ({ ...prev, role: e.target.value }))}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -1142,3 +1153,46 @@ function ActionModal({ type, user, actionData, setActionData, onSubmit, onClose,
         </div>
     );
 }
+
+// PropTypes for components
+UserStatsCards.propTypes = {
+    stats: PropTypes.object,
+    isLoading: PropTypes.bool.isRequired
+};
+
+BulkActions.propTypes = {
+    selectedCount: PropTypes.number.isRequired,
+    onBulkAction: PropTypes.func.isRequired,
+    onClearSelection: PropTypes.func.isRequired
+};
+
+SortableHeader.propTypes = {
+    field: PropTypes.string.isRequired,
+    currentSort: PropTypes.shape({
+        field: PropTypes.string,
+        direction: PropTypes.oneOf(['asc', 'desc'])
+    }).isRequired,
+    onSort: PropTypes.func.isRequired,
+    children: PropTypes.node.isRequired
+};
+
+UserActivityModal.propTypes = {
+    user: PropTypes.object,
+    activity: PropTypes.array,
+    isLoading: PropTypes.bool.isRequired,
+    onClose: PropTypes.func.isRequired
+};
+
+ActionModal.propTypes = {
+    type: PropTypes.oneOf(['status', 'role', 'delete', 'view']).isRequired,
+    user: PropTypes.object,
+    actionData: PropTypes.shape({
+        status: PropTypes.string,
+        role: PropTypes.string,
+        reason: PropTypes.string
+    }).isRequired,
+    setActionData: PropTypes.func.isRequired,
+    onSubmit: PropTypes.func.isRequired,
+    onClose: PropTypes.func.isRequired,
+    isLoading: PropTypes.bool.isRequired
+};

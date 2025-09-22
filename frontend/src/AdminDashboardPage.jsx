@@ -1,5 +1,6 @@
 import React, { Suspense, useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from './api/queryKeys';
 import {
     ChartBarIcon,
     DocumentTextIcon,
@@ -688,7 +689,7 @@ function QuickActions({ dashboardData, onTabChange }) {
 
 const RecentAdminActions = () => {
     const { data: recentActions } = useQuery({
-        queryKey: ['recentAdminActions'],
+        queryKey: queryKeys.admin.recentActions(),
         queryFn: fetchRecentAdminActions,
         refetchInterval: 60000,
         staleTime: 30000
@@ -829,7 +830,7 @@ export default function AdminDashboardPage() {
         refetch: refetchDashboard,
         error: dashboardErrorDetails
     } = useQuery({
-        queryKey: ['adminDashboard'],
+        queryKey: queryKeys.admin.dashboard(),
         queryFn: fetchDashboardData,
         refetchInterval: 30000,
         staleTime: 15000,
@@ -841,7 +842,7 @@ export default function AdminDashboardPage() {
 
     // Platform health data with retry logic
     const { data: healthData, refetch: refetchHealth } = useQuery({
-        queryKey: ['platformHealth'],
+        queryKey: queryKeys.admin.platformHealth(),
         queryFn: fetchPlatformHealth,
         refetchInterval: 60000,
         staleTime: 30000,
@@ -921,7 +922,7 @@ export default function AdminDashboardPage() {
             await Promise.all([
                 refetchDashboard(),
                 refetchHealth(),
-                queryClient.invalidateQueries({ queryKey: ['recentAdminActions'] })
+                queryClient.invalidateQueries({ queryKey: queryKeys.admin.recentActions() })
             ]);
             toast.success('Dashboard refreshed successfully', { id: 'refresh' });
         } catch (error) {

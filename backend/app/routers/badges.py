@@ -3,7 +3,7 @@ Badges module for Impact ID application.
 """
 
 
-from datetime import datetime
+from app.utils.common import utcnow
 from enum import Enum
 from typing import List, Optional
 import re
@@ -54,36 +54,40 @@ async def create_badge(
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(auth.has_role_async("admin"))
 ):
-    """Admin endpoint to create a new unlockable badge with enhanced validation."""
-    # Check for duplicate titles
+    """Admin endpoint to create a new badge with validation.
+
+    NOTE: The current `Badge` ORM model does not include fields like `category`,
+    `display_order`, or `created_by` that some higher-level design comments
+    reference. This implementation restricts persisted fields to those actually
+    present on the model to avoid runtime errors. Future migrations can extend
+    the model; this endpoint will adapt accordingly.
+    """
+    # Duplicate title check
     existing_stmt = select(models.Badge).where(models.Badge.title == badge_data.title)
     existing_result = await db.execute(existing_stmt)
     if existing_result.scalars().first():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A badge with this title already exists."
-        ) from e
+        )
 
-    # Validate criteria format
+    # Criteria validation
     if not _validate_badge_criteria(badge_data.criteria):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid badge criteria format. Use: 'first_submission', 'X_tasks', 'xp_X', 'streak_X'"
-        ) from e
+            detail="Invalid badge criteria format. Use: 'first_submission', 'X_tasks', 'xp_X', 'streak_X', 'weave_X'"
+        )
 
-    # Validate icon URL if provided
-    if badge_data.icon and not badge_data.icon.startswith(('http://', 'https://', '/static/')):
+    # Icon URL validation (schema uses icon_url)
+    if badge_data.icon_url and not badge_data.icon_url.startswith(("http://", "https://", "/static/")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Icon must be a valid URL or static file path."
-        ) from e
+            detail="icon_url must be a valid URL or static path."
+        )
 
-    new_badge = models.Badge(
-        **badge_data.model_dump(),
-        created_by=current_user.id,
-        created_at=datetime.utcnow()
-    )
-
+    # Only pass fields that exist on the ORM model
+    allowed = badge_data.model_dump()
+    new_badge = models.Badge(**allowed, created_at=utcnow())
     db.add(new_badge)
     try:
         await db.commit()
@@ -93,11 +97,10 @@ async def create_badge(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Badge creation failed due to database constraint."
-        ) from e
+    )
 
-    # Background task to check and award this badge to existing users
+    # Placeholder for future retroactive awarding
     background_tasks.add_task(_retroactively_award_badge, new_badge.id)
-
     return new_badge
 
 @router.put("/{badge_id}", response_model=schemas.BadgeOut)
@@ -110,26 +113,20 @@ async def update_badge(
     """Admin endpoint to update an existing badge."""
     badge = await db.get(models.Badge, badge_id)
     if not badge:
-        try:
-
-            pass
-
-        except Exception as e:
-
-            raise HTTPException(status_code=500, detail="Error") from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Badge not found")
 
     # Validate criteria if being updated
     if badge_data.criteria and not _validate_badge_criteria(badge_data.criteria):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid badge criteria format."
-        ) from e
+        )
 
     # Update fields
     for field, value in badge_data.model_dump(exclude_unset=True).items():
         setattr(badge, field, value)
 
-    badge.updated_at = datetime.utcnow()
+    badge.updated_at = utcnow()
     await db.commit()
     await db.refresh(badge)
     return badge
@@ -143,13 +140,7 @@ async def delete_badge(
     """Admin endpoint to soft delete a badge."""
     badge = await db.get(models.Badge, badge_id)
     if not badge:
-        try:
-
-            pass
-
-        except Exception as e:
-
-            raise HTTPException(status_code=500, detail="Error") from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Badge not found")
 
     # Check if any users have earned this badge
     earned_count_stmt = select(func.count(models.UserBadge.id)).where(
@@ -161,7 +152,7 @@ async def delete_badge(
     if earned_count > 0:
         # Soft delete - don't remove badges users have already earned
         badge.is_active = False
-        badge.deleted_at = datetime.utcnow()
+        badge.deleted_at = utcnow()
         await db.commit()
         return {"message": f"Badge deactivated. {earned_count} users will keep their earned badge."}
     else:
@@ -268,13 +259,7 @@ async def get_badge_detail(
     """Get detailed information about a specific badge."""
     badge = await db.get(models.Badge, badge_id)
     if not badge or not badge.is_active:
-        try:
-
-            pass
-
-        except Exception as e:
-
-            raise HTTPException(status_code=500, detail="Error") from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Badge not found")
 
     # Get earning statistics
     earned_count_stmt = select(func.count(models.UserBadge.id)).where(
@@ -545,20 +530,20 @@ async def _calculate_badge_progress(user: models.User, db: AsyncSession) -> dict
             try:
                 required = int(criteria.split('_')[0])
                 percentage = min(100, (approved_count / required) * 100)
-            except (ValueError, IndexError) as e:
+            except (ValueError, IndexError):
                 continue
         elif criteria.startswith("xp_"):
             try:
                 required = int(criteria.split('_')[1])
                 percentage = min(100, (user.xp / required) * 100)
-            except (ValueError, IndexError) as e:
+            except (ValueError, IndexError):
                 continue
         elif criteria.startswith("streak_"):
             try:
                 required = int(criteria.split('_')[1])
                 current_streak = getattr(user, 'streak', 0)
                 percentage = min(100, (current_streak / required) * 100)
-            except (ValueError, IndexError) as e:
+            except (ValueError, IndexError):
                 continue
 
         progress[badge.id] = round(percentage, 1)
@@ -579,14 +564,14 @@ def _get_progress_description(criteria: str, user: models.User, percentage: floa
             required = int(criteria.split('_')[0])
             # You'd need to get actual completed count here
             return f"Complete {required} tasks to earn this badge"
-        except (ValueError, IndexError) as e:
+        except (ValueError, IndexError):
             return "Progress criteria not available"
     elif criteria.startswith("xp_"):
         try:
             required = int(criteria.split('_')[1])
             needed = required - user.xp
             return f"Earn {needed} more XP to unlock this badge"
-        except (ValueError, IndexError) as e:
+        except (ValueError, IndexError):
             return "Progress criteria not available"
     elif criteria.startswith("streak_"):
         try:
@@ -594,7 +579,7 @@ def _get_progress_description(criteria: str, user: models.User, percentage: floa
             current = getattr(user, 'streak', 0)
             needed = required - current
             return f"Maintain a {needed} day longer streak to earn this badge"
-        except (ValueError, IndexError) as e:
+        except (ValueError, IndexError):
             return "Progress criteria not available"
 
     return "Progress criteria not available"

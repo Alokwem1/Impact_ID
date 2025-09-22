@@ -28,6 +28,7 @@ import {
     FireIcon as FireIconSolid
 } from '@heroicons/react/24/solid';
 import apiClient from '../api/axios';
+import { queryKeys } from '../api/queryKeys';
 import toast from 'react-hot-toast';
 
 // Fetch user profile with stats
@@ -55,7 +56,7 @@ export default function Layout({ children, showBreadcrumbs = false, breadcrumbIt
 
     // Fetch user profile data
     const { data: userProfile } = useQuery({
-        queryKey: ['user_profile'],
+        queryKey: queryKeys.user.me(),
         queryFn: fetchUserProfile,
         staleTime: 5 * 60 * 1000, // 5 minutes
         refetchOnWindowFocus: false
@@ -63,7 +64,7 @@ export default function Layout({ children, showBreadcrumbs = false, breadcrumbIt
 
     // Fetch notifications count
     const { data: notificationsCount = 0 } = useQuery({
-        queryKey: ['notifications_count'],
+        queryKey: queryKeys.notifications.count(),
         queryFn: fetchNotificationsCount,
         refetchInterval: 30000, // Refetch every 30 seconds
         staleTime: 10000, // 10 seconds

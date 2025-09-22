@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import { visualizer } from 'rollup-plugin-visualizer'
 
 export default defineConfig(({ command, mode }) => {
   const isProduction = mode === 'production'
@@ -19,6 +20,12 @@ export default defineConfig(({ command, mode }) => {
             ['babel-plugin-react-remove-properties', { properties: ['data-testid'] }]
           ]
         } : undefined,
+      }),
+      process.env.ANALYZE === 'true' && visualizer({
+        filename: 'dist/bundle-analysis.html',
+        template: 'treemap',
+        gzipSize: true,
+        brotliSize: true,
       })
     ],
     
@@ -234,22 +241,23 @@ export default defineConfig(({ command, mode }) => {
           },
           entryFileNames: 'js/impact-id-[hash:8].js',
           assetFileNames: (assetInfo) => {
-            const info = assetInfo.name.split('.');
-            const ext = info[info.length - 1];
-            
+            const name = assetInfo.fileName || '';
+            const parts = name.split('.');
+            const ext = parts.length > 1 ? parts.pop() : 'asset';
+
             // Organize assets by type
-            if (/\.(png|jpe?g|gif|svg|webp|avif)$/i.test(assetInfo.name)) {
+            if (/\.(png|jpe?g|gif|svg|webp|avif)$/i.test(name)) {
               return `images/[name]-[hash:8].${ext}`;
             }
-            
-            if (/\.(woff2?|eot|ttf|otf)$/i.test(assetInfo.name)) {
+
+            if (/\.(woff2?|eot|ttf|otf)$/i.test(name)) {
               return `fonts/[name]-[hash:8].${ext}`;
             }
-            
-            if (/\.css$/i.test(assetInfo.name)) {
+
+            if (/\.css$/i.test(name)) {
               return `css/[name]-[hash:8].${ext}`;
             }
-            
+
             return `assets/[name]-[hash:8].${ext}`;
           },
           
@@ -428,8 +436,8 @@ export default defineConfig(({ command, mode }) => {
     // Base URL configuration
     base: '/',
     
-    // Public directory
-    publicDir: 'src/public',
+  // Public directory (ensure PWA assets like site.webmanifest & sw.js are copied)
+  publicDir: 'public',
     
     // Cache directory
     cacheDir: 'node_modules/.vite',

@@ -3,7 +3,8 @@ Admin module for Impact ID application.
 """
 
 
-from datetime import datetime, timedelta
+from app.utils.common import utcnow
+from datetime import timedelta, datetime
 from enum import Enum
 from typing import List, Optional
 import csv
@@ -20,7 +21,9 @@ from sqlalchemy.orm import joinedload, selectinload
 from app import models, auth, schemas
 from app.database import get_db
 
-router = APIRouter(prefix="/admin", tags=["Admin"])
+# NOTE: Internal prefix removed to avoid double mounting at /api/admin/admin/*.
+# The main application includes this router with prefix='/api/admin'.
+router = APIRouter(tags=["Admin"]) 
 
 # =========================
 # 🛡️ Admin Configuration
@@ -52,7 +55,7 @@ async def get_admin_dashboard(
     """
     🎯 Comprehensive admin dashboard with key metrics and insights.
     """
-    now = datetime.utcnow()
+    now = utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_ago = now - timedelta(days=7)
     month_ago = now - timedelta(days=30)
@@ -68,10 +71,12 @@ async def get_admin_dashboard(
     new_today_result = await db.execute(new_users_today_stmt)
     new_users_today = new_today_result.scalar() or 0
 
-    active_users_week_stmt = select(func.count(models.User.id.distinct())).select_from(
-        models.TaskSubmission
-    ).join(models.User).where(
-        models.TaskSubmission.submitted_at >= week_ago
+    # Explicit join needed due to multiple FKs from task_submissions -> users
+    active_users_week_stmt = (
+        select(func.count(models.User.id.distinct()))
+        .select_from(models.TaskSubmission)
+        .join(models.User, models.TaskSubmission.user_id == models.User.id)
+        .where(models.TaskSubmission.submitted_at >= week_ago)
     )
     active_week_result = await db.execute(active_users_week_stmt)
     active_users_week = active_week_result.scalar() or 0
@@ -147,7 +152,7 @@ async def get_submissions(
         filters.append(models.TaskSubmission.task_id == task_id)
 
     # Date filter
-    cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+    cutoff_date = utcnow() - timedelta(days=days_back)
     filters.append(models.TaskSubmission.submitted_at >= cutoff_date)
 
     if filters:
@@ -194,18 +199,12 @@ async def flag_submission(
     """Flag a submission for review or inappropriate content."""
     submission = await db.get(models.TaskSubmission, submission_id)
     if not submission:
-        try:
-
-            pass
-
-        except Exception as e:
-
-            raise HTTPException(status_code=500, detail="Error") from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
 
     submission.status = "flagged"
     submission.flagged_reason = flag_data.reason
     submission.flagged_by = current_user.id
-    submission.flagged_at = datetime.utcnow()
+    submission.flagged_at = utcnow()
 
     await db.commit()
 
@@ -249,7 +248,7 @@ async def bulk_review_submissions(
             continue
 
         submission.status = "approved" if bulk_data.approve else "declined"
-        submission.reviewed_at = datetime.utcnow()
+        submission.reviewed_at = utcnow()
         submission.reviewed_by = current_user.id
         submission.review_notes = bulk_data.notes
 
@@ -368,13 +367,7 @@ async def update_user_status(
     """Update a user's account status (suspend, ban, activate)."""
     user = await db.get(models.User, user_id)
     if not user:
-        try:
-
-            pass
-
-        except Exception as e:
-
-            raise HTTPException(status_code=500, detail="Error") from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     if user.id == current_user.id:
         raise HTTPException(
@@ -386,7 +379,7 @@ async def update_user_status(
     user.status = status_data.status
     user.status_reason = status_data.reason
     user.status_updated_by = current_user.id
-    user.status_updated_at = datetime.utcnow()
+    user.status_updated_at = utcnow()
 
     # Create audit log
     audit_log = models.ActivityLog(
@@ -395,7 +388,7 @@ async def update_user_status(
         target_type="user",
         target_id=user_id,
         details=f"Status changed from {old_status} to {status_data.status}. Reason: {status_data.reason}",
-        created_at=datetime.utcnow()
+        created_at=utcnow()
     )
     db.add(audit_log)
 
@@ -422,19 +415,13 @@ async def update_user_role(
     """Update a user's role (admin, moderator, user)."""
     user = await db.get(models.User, user_id)
     if not user:
-        try:
-
-            pass
-
-        except Exception as e:
-
-            raise HTTPException(status_code=500, detail="Error") from e
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     if user.id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot modify your own role."
-        ) from e
+        )
 
     valid_roles = ["user", "moderator", "admin"]
     if role_data.role not in valid_roles:
@@ -453,7 +440,7 @@ async def update_user_role(
         target_type="user",
         target_id=user_id,
         details=f"Role changed from {old_role} to {role_data.role}",
-        created_at=datetime.utcnow()
+        created_at=utcnow()
     )
     db.add(audit_log)
 
@@ -474,7 +461,7 @@ async def get_platform_analytics(
     """
     📈 Comprehensive platform analytics and insights.
     """
-    cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+    cutoff_date = utcnow() - timedelta(days=days_back)
 
     # User growth metrics
     user_growth_stmt = text("""
@@ -630,7 +617,7 @@ async def get_audit_logs(
     current_user: models.User = Depends(auth.has_role_async("admin"))
 ):
     """Get audit logs for admin actions."""
-    cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+    cutoff_date = utcnow() - timedelta(days=days_back)
 
     stmt = select(models.ActivityLog).options(
         joinedload(models.ActivityLog.admin)
@@ -675,7 +662,7 @@ async def export_audit_logs(
     📥 Export audit logs as CSV or JSON file.
     🚨 CRITICAL: This endpoint was missing and causing frontend errors.
     """
-    cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+    cutoff_date = utcnow() - timedelta(days=days_back)
 
     # Build query with filters
     stmt = select(models.ActivityLog).options(
@@ -707,7 +694,7 @@ async def export_audit_logs(
     ]
 
     # Generate filename with timestamp
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = utcnow().strftime("%Y%m%d_%H%M%S")
 
     if format == "csv":
         # Create CSV content
@@ -753,7 +740,7 @@ async def _calculate_avg_response_time(db: AsyncSession) -> float:
     ).where(
         and_(
             models.TaskSubmission.reviewed_at.isnot(None),
-            models.TaskSubmission.submitted_at >= datetime.utcnow() - timedelta(days=7)
+            models.TaskSubmission.submitted_at >= utcnow() - timedelta(days=7)
         )
     )
     result = await db.execute(stmt)
@@ -767,7 +754,7 @@ async def _calculate_error_rate(db: AsyncSession) -> float:
 
 async def _get_top_performers(db: AsyncSession, limit: int) -> List[dict]:
     """Get top performing users this week."""
-    week_ago = datetime.utcnow() - timedelta(days=7)
+    week_ago = utcnow() - timedelta(days=7)
 
     stmt = select(
         models.User.username,
@@ -829,7 +816,7 @@ async def _get_total_submissions(db: AsyncSession, since_date: datetime) -> int:
 
 async def _get_avg_daily_active_users(db: AsyncSession, since_date: datetime) -> float:
     """Get average daily active users."""
-    days = (datetime.utcnow() - since_date).days
+    days = (utcnow() - since_date).days
     if days == 0:
         return 0
 

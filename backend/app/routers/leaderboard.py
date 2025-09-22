@@ -3,12 +3,12 @@ Leaderboard module for Impact ID application.
 """
 
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
-from sqlalchemy import func, and_, desc, case
+from sqlalchemy import func, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
@@ -18,6 +18,10 @@ from app.database import get_db
 
 
 router = APIRouter(prefix="/leaderboard", tags=["Leaderboard"])
+def _utcnow() -> datetime:
+    """Return naive UTC datetime without using deprecated utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 # =========================
 # 🏆 Leaderboard Types
@@ -58,7 +62,7 @@ async def get_leaderboard(
     Enhanced with user positioning and comprehensive statistics.
     """
     # Calculate date filters for time periods
-    now = datetime.utcnow()
+    now = _utcnow()
     date_filter = None
 
     if period == TimePeriod.DAILY:
@@ -70,7 +74,7 @@ async def get_leaderboard(
     elif period == TimePeriod.YEARLY:
         date_filter = now - timedelta(days=365)
 
-    # Build leaderboard based on type
+    # Build leaderboard based on selected type (avoids creating unused coroutine warnings)
     if leaderboard_type == LeaderboardType.XP:
         leaderboard = await _get_xp_leaderboard(db, date_filter, limit, offset)
     elif leaderboard_type == LeaderboardType.TASKS:
@@ -84,17 +88,12 @@ async def get_leaderboard(
     elif leaderboard_type == LeaderboardType.BADGES:
         leaderboard = await _get_badges_leaderboard(db, limit, offset)
     else:
-        try:
-
-            pass
-
-        except Exception as e:
-
-            raise HTTPException(status_code=500, detail="Error") from e
+        raise HTTPException(status_code=400, detail="Unsupported leaderboard type")
 
     # Add current user's position if authenticated
     if current_user:
-        user_position = await _get_user_position(db, current_user.id, leaderboard_type, date_filter)
+        # Optionally compute position; not used in response yet
+        await _get_user_position(db, current_user.id, leaderboard_type, date_filter)
         # Add user position to response metadata (you might want to include this in a wrapper)
         for entry in leaderboard:
             if entry.user_id == current_user.id:
@@ -113,7 +112,7 @@ async def get_my_position(
     """
     📊 Gets the current user's position across all leaderboard types.
     """
-    now = datetime.utcnow()
+    now = _utcnow()
     date_filter = None
 
     if period == TimePeriod.DAILY:
@@ -137,7 +136,7 @@ async def get_my_position(
         leaderboard_type=leaderboard_type,
         period=period,
         position=position,
-        total_users=await _get_total_users_count(db, leaderboard_type, date_filter)
+        total_users=await _get_total_users_count(db)
     )
 
 @router.get("/stats", response_model=schemas.LeaderboardStats)
@@ -147,9 +146,9 @@ async def get_leaderboard_stats(
     """
     📈 Gets comprehensive leaderboard statistics and platform metrics.
     """
-    now = datetime.utcnow()
+    now = _utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_ago = now - timedelta(days=7)
+    # week_ago retained only if needed in future analytics; remove to avoid unused variable
 
     # Total users
     total_users_stmt = select(func.count(models.User.id)).where(models.User.status == "active")
@@ -228,28 +227,109 @@ async def _get_xp_leaderboard(
     """Get XP-based leaderboard with optional time filtering."""
     if date_filter:
         # For time-filtered XP, sum XP from task completions in period
-        stmt = select(
-            models.User.id,
-            models.User.username,
-            func.sum(models.Task.xp_reward).label('period_xp'),
-            func.count(models.TaskSubmission.id).label('tasks_completed')
-        ).select_from(
-            models.User
-        ).join(
-            models.TaskSubmission, models.User.id == models.TaskSubmission.user_id
-        ).join(
-            models.Task, models.TaskSubmission.task_id == models.Task.id
-        ).where(
-            and_(
-                models.TaskSubmission.status == "approved",
-                models.TaskSubmission.submitted_at >= date_filter,
-                models.User.status == "active"
+        stmt = (
+            select(
+                models.User.id,
+                models.User.username,
+                models.User.xp.label("total_xp"),
+                models.User.level,
+                models.User.streak,
+                models.User.essence_balance,
+                func.sum(models.Task.xp_reward).label('period_xp'),
+                func.count(models.TaskSubmission.id).label('tasks_completed')
             )
-        ).group_by(
-            models.User.id, models.User.username
-        ).order_by(
-            desc('period_xp')
-        ).offset(offset).limit(limit)
+            .select_from(models.User)
+            .join(models.TaskSubmission, models.User.id == models.TaskSubmission.user_id)
+            .join(models.Task, models.TaskSubmission.task_id == models.Task.id)
+            .where(
+                and_(
+                    models.TaskSubmission.status == "approved",
+                    models.TaskSubmission.submitted_at >= date_filter,
+                    models.User.status == "active"
+                )
+            )
+            .group_by(
+                models.User.id,
+                models.User.username,
+                models.User.xp,
+                models.User.level,
+                models.User.streak,
+                models.User.essence_balance
+            )
+            .order_by(desc('period_xp'))
+            .offset(offset)
+            .limit(limit)
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        # Fetch badge counts per user (simple approach for clarity)
+        user_ids = [r.id for r in rows]
+        badge_counts = {uid: 0 for uid in user_ids}
+        if user_ids:
+            badge_stmt = select(models.UserBadge.user_id, func.count(models.UserBadge.id)).where(
+                models.UserBadge.user_id.in_(user_ids)
+            ).group_by(models.UserBadge.user_id)
+            badge_res = await db.execute(badge_stmt)
+            for uid, count in badge_res.all():
+                badge_counts[uid] = count
+
+        return [
+            schemas.LeaderboardEntry(
+                rank=idx + offset + 1,
+                user_id=row.id,
+                username=row.username,
+                xp=int(row.total_xp or 0),
+                level=int(row.level or 0),
+                streak=int(row.streak or 0),
+                essence_balance=int(row.essence_balance or 0),
+                badge_count=badge_counts.get(row.id, 0),
+                tasks_completed=int(row.tasks_completed or 0),
+                score=int(row.period_xp or 0),
+            )
+            for idx, row in enumerate(rows)
+        ]
+    else:
+        # All-time XP leaderboard
+        # Use subqueries to avoid row multiplication and lazy loading in async context
+        badge_subq = (
+            select(
+                models.UserBadge.user_id.label("b_user_id"),
+                func.count(models.UserBadge.id).label("badge_count")
+            )
+            .group_by(models.UserBadge.user_id)
+            .subquery()
+        )
+
+        tasks_subq = (
+            select(
+                models.TaskSubmission.user_id.label("t_user_id"),
+                func.count(models.TaskSubmission.id).filter(models.TaskSubmission.status == "approved").label("tasks_completed")
+            )
+            .group_by(models.TaskSubmission.user_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                models.User.id,
+                models.User.username,
+                models.User.xp,
+                models.User.level,
+                models.User.streak,
+                models.User.essence_balance,
+                func.coalesce(badge_subq.c.badge_count, 0).label("badge_count"),
+                func.coalesce(tasks_subq.c.tasks_completed, 0).label("tasks_completed")
+            )
+            .select_from(models.User)
+            .outerjoin(badge_subq, badge_subq.c.b_user_id == models.User.id)
+            .outerjoin(tasks_subq, tasks_subq.c.t_user_id == models.User.id)
+            .where(models.User.status == "active")
+            .order_by(desc(models.User.xp))
+            .offset(offset)
+            .limit(limit)
+        )
 
         result = await db.execute(stmt)
         rows = result.all()
@@ -259,38 +339,15 @@ async def _get_xp_leaderboard(
                 rank=idx + offset + 1,
                 user_id=row.id,
                 username=row.username,
-                score=int(row.period_xp or 0),
-                metric="XP (Period)",
-                additional_data={
-                    "tasks_completed": row.tasks_completed,
-                    "avg_xp_per_task": round((row.period_xp or 0) / max(row.tasks_completed, 1), 1)
-                }
+                xp=int(row.xp or 0),
+                level=int(row.level or 0),
+                streak=int(row.streak or 0),
+                essence_balance=int(row.essence_balance or 0),
+                badge_count=int(row.badge_count or 0),
+                tasks_completed=int(row.tasks_completed or 0),
+                score=int(row.xp or 0),
             )
             for idx, row in enumerate(rows)
-        ]
-    else:
-        # All-time XP leaderboard
-        stmt = select(models.User).where(
-            models.User.status == "active"
-        ).order_by(desc(models.User.xp)).offset(offset).limit(limit)
-
-        result = await db.execute(stmt)
-        users = result.scalars().all()
-
-        return [
-            schemas.LeaderboardEntry(
-                rank=idx + offset + 1,
-                user_id=user.id,
-                username=user.username,
-                score=user.xp,
-                metric="Total XP",
-                additional_data={
-                    "level": user.level,
-                    "streak": getattr(user, 'streak', 0),
-                    "essence_balance": user.essence_balance
-                }
-            )
-            for idx, user in enumerate(users)
         ]
 
 async def _get_tasks_leaderboard(
@@ -401,13 +458,13 @@ async def _get_weaving_leaderboard(
     stmt = select(
         models.User.id,
         models.User.username,
-        func.count(models.TaskSubmission.id).label('weave_count')
+        func.count(models.WeaveSubmission.id).label('weave_count')
     ).select_from(models.User).join(
-        models.TaskSubmission, models.User.id == models.TaskSubmission.user_id
+        models.WeaveSubmission, models.User.id == models.WeaveSubmission.user_id
     ).where(
         and_(
             models.User.status == "active",
-            models.TaskSubmission.created_at >= date_filter if date_filter else True
+            models.WeaveSubmission.created_at >= date_filter if date_filter else True
         )
     ).group_by(
         models.User.id, models.User.username
@@ -471,15 +528,75 @@ async def _get_user_position(
     leaderboard_type: LeaderboardType,
     date_filter: Optional[datetime]
 ) -> Optional[int]:
-    """Get a specific user's position in the leaderboard."""
-    # This would implement position calculation logic
-    # For now, return None (you can implement based on your needs)
+    """Get a specific user's position in the leaderboard.
+    Currently implemented for XP leaderboards (all-time and period).
+    Returns 1-based rank or None if the user has no activity for the requested period.
+    """
+    # XP leaderboard (all-time or period)
+    if leaderboard_type == LeaderboardType.XP:
+        if date_filter:
+            # Compute user's XP gained since date_filter
+            user_xp_stmt = (
+                select(func.sum(models.Task.xp_reward))
+                .select_from(models.TaskSubmission)
+                .join(models.Task, models.TaskSubmission.task_id == models.Task.id)
+                .where(
+                    and_(
+                        models.TaskSubmission.user_id == user_id,
+                        models.TaskSubmission.status == "approved",
+                        models.TaskSubmission.submitted_at >= date_filter,
+                    )
+                )
+            )
+            user_period_xp = (await db.execute(user_xp_stmt)).scalar() or 0
+            if user_period_xp <= 0:
+                return None
+
+            # Count users with greater period XP
+            period_xp_subq = (
+                select(
+                    models.User.id.label("uid"),
+                    func.sum(models.Task.xp_reward).label("period_xp"),
+                )
+                .select_from(models.TaskSubmission)
+                .join(models.Task, models.TaskSubmission.task_id == models.Task.id)
+                .join(models.User, models.User.id == models.TaskSubmission.user_id)
+                .where(
+                    and_(
+                        models.TaskSubmission.status == "approved",
+                        models.TaskSubmission.submitted_at >= date_filter,
+                        models.User.status == "active",
+                    )
+                )
+                .group_by(models.User.id)
+                .subquery()
+            )
+
+            count_stmt = select(func.count(period_xp_subq.c.uid)).where(
+                period_xp_subq.c.period_xp > user_period_xp
+            )
+            greater_count = (await db.execute(count_stmt)).scalar() or 0
+            return int(greater_count) + 1
+        else:
+            # All-time position by total XP
+            user_stmt = select(models.User.xp).where(
+                and_(models.User.id == user_id, models.User.status == "active")
+            )
+            user_xp = (await db.execute(user_stmt)).scalar()
+            if user_xp is None:
+                return None
+
+            count_stmt = select(func.count(models.User.id)).where(
+                and_(models.User.status == "active", models.User.xp > user_xp)
+            )
+            greater_count = (await db.execute(count_stmt)).scalar() or 0
+            return int(greater_count) + 1
+
+    # Other leaderboard types not yet implemented
     return None
 
 async def _get_total_users_count(
     db: AsyncSession,
-    leaderboard_type: LeaderboardType,
-    date_filter: Optional[datetime]
 ) -> int:
     """Get total number of users in leaderboard."""
     stmt = select(func.count(models.User.id)).where(models.User.status == "active")

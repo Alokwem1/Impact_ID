@@ -14,6 +14,8 @@ from fastapi import HTTPException, status
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
+from app.utils.common import utcnow
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,118 +82,71 @@ def check_password_strength(password: str) -> tuple[bool, List[str]]:
 # 🎫 JWT TOKEN MANAGEMENT
 # ================================
 
-# JWT Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))  # 24 hours
+"""Unified token system wrapper.
+
+This module historically contained standalone JWT helpers. We now delegate token
+creation/verification to the advanced manager in `app.utils.token` while retaining
+the original function names for backward compatibility with existing router imports.
+"""
+
+from app.utils import token as unified_token
+from app.utils.token import TokenType
+
+# Legacy constants kept for backward compatibility (may be removed later)
+SECRET_KEY = os.getenv("SECRET_KEY", "development-placeholder-secret")
+ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Create access token (backward compatible wrapper).
+
+    Accepts the historical `data` dict with keys like user_id, username, email, role.
+    Delegates to the unified token manager. Additional fields are ignored gracefully.
     """
-    🔐 Create JWT access token with expiration.
-    """
-    to_encode = data.copy()
-
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-
-    to_encode.update({
-        "exp": expire,
-        "iat": datetime.utcnow(),
-        "type": "access"
-    })
-
+    # Support legacy keys plus OAuth2 style 'sub'
+    raw_user_id = data.get("user_id") or data.get("id") or data.get("sub")
     try:
-        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        return encoded_jwt
-    except Exception as e:
-        logger.error("Token creation error: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not create access token"
-        ) from e
-
-def create_refresh_token(data: dict) -> str:
-    """
-    🔄 Create JWT refresh token with longer expiration.
-    """
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-
-    to_encode.update({
-        "exp": expire,
-        "iat": datetime.utcnow(),
-        "type": "refresh"
-    })
-
-    try:
-        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        return encoded_jwt
-    except Exception as e:
-        logger.error("Refresh token creation error: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not create refresh token"
-        ) from e
-
-def verify_token(token: str, token_type: str = "access") -> Dict[str, Any]:
-    """
-    🔍 Verify JWT token and return payload.
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+        user_id = int(raw_user_id) if raw_user_id is not None else 0
+    except (TypeError, ValueError):  # ensure safe fallback
+        user_id = 0
+    return unified_token.create_access_token(
+        user_id=user_id,
+        username=data.get("username", ""),
+        email=data.get("email", ""),
+        role=data.get("role", "user"),
+        expires_delta=expires_delta,
     )
 
+def create_refresh_token(data: dict) -> str:
+    """Create refresh token via unified manager."""
+    raw_user_id = data.get("user_id") or data.get("id") or data.get("sub")
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = int(raw_user_id) if raw_user_id is not None else 0
+    except (TypeError, ValueError):
+        user_id = 0
+    return unified_token.create_refresh_token(
+        user_id=user_id,
+        username=data.get("username", ""),
+        email=data.get("email", ""),
+        role=data.get("role", "user"),
+    )
 
-        # Verify token type
-        if getattr(payload, "type", None) != token_type:
-            logger.warning("Invalid token type: expected %s, got %s", token_type, getattr(payload, "type", None))
-            try:
+def verify_token(token: str, token_type: str = "access") -> Dict[str, Any]:
+    """Verify token via unified manager; returns a plain dict payload.
 
-                pass
-
-            except Exception :
-
-                raise HTTPException(status_code=500, detail="Error")
-
-        # Check expiration
-        exp = getattr(payload, "exp", None)
-        if exp is None or datetime.fromtimestamp(exp) < datetime.utcnow():
-            logger.warning("Token has expired")
-            try:
-
-                pass
-
-            except Exception :
-
-                raise HTTPException(status_code=500, detail="Error")
-
-        return payload
-
-    except JWTError :
-        logger.error("JWT verification error: %s", e)
-        try:
-
-            pass
-
-        except Exception :
-
-            raise HTTPException(status_code=500, detail="Error")
-    except Exception as e:
-        logger.error("Token verification error: %s", e)
-        try:
-
-            pass
-
-        except Exception :
-
-            raise HTTPException(status_code=500, detail="Error")
+    token_type argument kept for backward compatibility (access|refresh).
+    """
+    expected = TokenType.ACCESS if token_type == "access" else (TokenType.REFRESH if token_type == "refresh" else None)
+    payload_obj = unified_token.verify_token(token, expected_type=expected)
+    # Convert dataclass/object to primitive dict
+    if hasattr(payload_obj, "to_dict"):
+        data = payload_obj.to_dict()
+    else:  # Already a dict-like
+        data = dict(payload_obj)
+    # Add legacy keys
+    data["type"] = payload_obj.token_type.value if hasattr(payload_obj, "token_type") else token_type
+    return data
 
 # ================================
 # 🔐 SECURITY UTILITIES
@@ -250,67 +205,26 @@ def create_rate_limit_key(identifier: str, endpoint: str) -> str:
 # ================================
 
 def create_email_verification_token(user_id: int, email: str) -> str:
-    """
-    📧 Create email verification token.
-    """
-    data = {
-        "user_id": user_id,
-        "email": email,
-        "purpose": "email_verification"
-    }
-    expire = datetime.utcnow() + timedelta(hours=24)
-    data["exp"] = expire
-
-    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+    """Delegate to unified token manager for email verification."""
+    return unified_token.create_email_verification_token(user_id=user_id, email=email)
 
 def verify_email_token(token: str) -> Dict[str, Any]:
-    """
-    ✅ Verify email verification token.
-    """
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if getattr(payload, "purpose", None) != "email_verification":
-            raise ValueError("Invalid token purpose")
-        return payload
-    except JWTError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification token"
-        ) from e
+    """Verify email verification token using unified manager."""
+    payload_obj = unified_token.verify_token(token, expected_type=TokenType.EMAIL_VERIFICATION)
+    return payload_obj.to_dict() if hasattr(payload_obj, "to_dict") else payload_obj
 
 # ================================
 # 🔑 PASSWORD RESET
 # ================================
 
 def create_password_reset_token(user_id: int, email: str) -> str:
-    """
-    🔑 Create password reset token.
-    """
-    data = {
-        "user_id": user_id,
-        "email": email,
-        "purpose": "password_reset",
-        "nonce": generate_secure_token(16)  # Prevent replay attacks
-    }
-    expire = datetime.utcnow() + timedelta(hours=2)  # Short expiry for security
-    data["exp"] = expire
-
-    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+    """Delegate password reset token creation to unified manager."""
+    return unified_token.create_password_reset_token(user_id=user_id, email=email)
 
 def verify_password_reset_token(token: str) -> Dict[str, Any]:
-    """
-    ✅ Verify password reset token.
-    """
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if getattr(payload, "purpose", None) != "password_reset":
-            raise ValueError("Invalid token purpose")
-        return payload
-    except JWTError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token"
-        ) from e
+    """Verify password reset token using unified manager."""
+    payload_obj = unified_token.verify_token(token, expected_type=TokenType.PASSWORD_RESET)
+    return payload_obj.to_dict() if hasattr(payload_obj, "to_dict") else payload_obj
 
 # ================================
 # 🔐 WALLET SIGNATURE VERIFICATION
@@ -398,7 +312,7 @@ class SecurityContext:
         """__init__ function."""
         self.ip_address = get_client_ip(request) if request else None
         self.user_agent = request.headers.get("user-agent", None) if request else None
-        self.timestamp = datetime.utcnow()
+        self.timestamp = utcnow()
         self.request_id = generate_secure_token(16)
 
     def to_dict(self) -> Dict[str, Any]:

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import PropTypes from 'prop-types';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryKeys';
 import { 
     CheckCircleIcon, 
     XCircleIcon, 
@@ -16,6 +18,18 @@ import {
 } from '@heroicons/react/24/outline';
 import apiClient from '../api/axios';
 import toast from 'react-hot-toast';
+
+// Shared helper: Get status badge color
+const getStatusColor = (status) => {
+    const colors = {
+        pending: 'bg-yellow-100 text-yellow-800',
+        approved: 'bg-green-100 text-green-800',
+        declined: 'bg-red-100 text-red-800',
+        rejected: 'bg-red-100 text-red-800',
+        flagged: 'bg-orange-100 text-orange-800'
+    };
+    return colors[status] || 'bg-gray-100 text-gray-800';
+};
 
 // ✅ CRITICAL FIX: Enhanced data-fetching function with correct API prefix
 const fetchSubmissions = async ({ status, userId, taskId, daysBack, limit, offset }) => {
@@ -115,7 +129,7 @@ export default function AdminSubmissions() {
         isError, 
         refetch 
     } = useQuery({
-        queryKey: ['adminSubmissions', filters],
+        queryKey: queryKeys.admin.submissions(filters),
         queryFn: () => fetchSubmissions(filters),
         refetchInterval: 30000, // Auto-refresh every 30 seconds
     });
@@ -125,7 +139,7 @@ export default function AdminSubmissions() {
         mutationFn: reviewSubmission,
         onSuccess: () => {
             toast.success('Submission reviewed successfully!');
-            queryClient.invalidateQueries({ queryKey: ['adminSubmissions'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.submissions() });
             setIsReviewModalOpen(false);
             setSelectedSubmission(null);
         },
@@ -139,7 +153,7 @@ export default function AdminSubmissions() {
         mutationFn: bulkReviewSubmissions,
         onSuccess: (data) => {
             toast.success(data.message || 'Bulk review completed!');
-            queryClient.invalidateQueries({ queryKey: ['adminSubmissions'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.submissions() });
             setIsBulkModalOpen(false);
             setSelectedSubmissions(new Set());
         },
@@ -153,7 +167,7 @@ export default function AdminSubmissions() {
         mutationFn: flagSubmission,
         onSuccess: () => {
             toast.success('Submission flagged successfully!');
-            queryClient.invalidateQueries({ queryKey: ['adminSubmissions'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.submissions() });
             setIsFlagModalOpen(false);
             setSelectedSubmission(null);
         },
@@ -265,17 +279,7 @@ export default function AdminSubmissions() {
         });
     };
 
-    // Get status badge color
-    const getStatusColor = (status) => {
-        const colors = {
-            pending: 'bg-yellow-100 text-yellow-800',
-            approved: 'bg-green-100 text-green-800',
-            declined: 'bg-red-100 text-red-800',
-            rejected: 'bg-red-100 text-red-800',
-            flagged: 'bg-orange-100 text-orange-800'
-        };
-        return colors[status] || 'bg-gray-100 text-gray-800';
-    };
+    // getStatusColor is defined at module scope
 
     // ✅ FIXED: Add useEffect for keyboard shortcuts
     useEffect(() => {
@@ -788,6 +792,29 @@ function SubmissionPreviewModal({ submission, onClose, onReview }) {
     );
 }
 
+// PropTypes for SubmissionPreviewModal
+SubmissionPreviewModal.propTypes = {
+    submission: PropTypes.shape({
+        id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+        username: PropTypes.string,
+        user_email: PropTypes.string,
+        task_title: PropTypes.string,
+        task_id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+        status: PropTypes.string,
+        submitted_at: PropTypes.oneOfType([
+            PropTypes.string,
+            PropTypes.number,
+            PropTypes.instanceOf(Date)
+        ]),
+        time_spent_minutes: PropTypes.number,
+        response: PropTypes.string,
+        attachments: PropTypes.arrayOf(PropTypes.string),
+        feedback: PropTypes.string,
+    }),
+    onClose: PropTypes.func.isRequired,
+    onReview: PropTypes.func.isRequired,
+};
+
 // Review Modal Component
 function ReviewModal({ submission, reviewData, setReviewData, onSubmit, onClose, isLoading }) {
     return (
@@ -883,6 +910,22 @@ function ReviewModal({ submission, reviewData, setReviewData, onSubmit, onClose,
     );
 }
 
+// PropTypes for ReviewModal
+ReviewModal.propTypes = {
+    submission: PropTypes.object,
+    reviewData: PropTypes.shape({
+        approve: PropTypes.bool.isRequired,
+        feedback: PropTypes.string,
+        score: PropTypes.number,
+        bonus_xp: PropTypes.number,
+        bonus_essence: PropTypes.number,
+    }).isRequired,
+    setReviewData: PropTypes.func.isRequired,
+    onSubmit: PropTypes.func.isRequired,
+    onClose: PropTypes.func.isRequired,
+    isLoading: PropTypes.bool.isRequired,
+};
+
 // Bulk Review Modal Component
 function BulkReviewModal({ selectedCount, onApprove, onDecline, onClose, isLoading }) {
     return (
@@ -923,6 +966,15 @@ function BulkReviewModal({ selectedCount, onApprove, onDecline, onClose, isLoadi
         </div>
     );
 }
+
+// PropTypes for BulkReviewModal
+BulkReviewModal.propTypes = {
+    selectedCount: PropTypes.number.isRequired,
+    onApprove: PropTypes.func.isRequired,
+    onDecline: PropTypes.func.isRequired,
+    onClose: PropTypes.func.isRequired,
+    isLoading: PropTypes.bool.isRequired,
+};
 
 // Flag Modal Component
 function FlagModal({ submission, flagData, setFlagData, onSubmit, onClose, isLoading }) {
@@ -986,3 +1038,16 @@ function FlagModal({ submission, flagData, setFlagData, onSubmit, onClose, isLoa
         </div>
     );
 }
+
+// PropTypes for FlagModal
+FlagModal.propTypes = {
+    submission: PropTypes.object,
+    flagData: PropTypes.shape({
+        reason: PropTypes.string.isRequired,
+        category: PropTypes.string.isRequired,
+    }).isRequired,
+    setFlagData: PropTypes.func.isRequired,
+    onSubmit: PropTypes.func.isRequired,
+    onClose: PropTypes.func.isRequired,
+    isLoading: PropTypes.bool.isRequired,
+};

@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryKeys';
 import apiClient from '../api/axios';
 import toast from 'react-hot-toast';
 import { 
@@ -7,20 +8,14 @@ import {
     UserIcon, 
     ShieldCheckIcon,
     ExclamationTriangleIcon,
-    EllipsisVerticalIcon,
     TrophyIcon,
     FireIcon,
-    CalendarIcon,
-    EnvelopeIcon,
     EyeIcon,
     CheckCircleIcon,
-    XCircleIcon,
     FlagIcon,
     ArrowPathIcon,
-    ChartBarIcon,
-    StarIcon
 } from '@heroicons/react/24/outline';
-import { ApprovalConfirmationModal, DeleteConfirmationModal, InfoConfirmationModal } from './ConfirmationModal';
+import { ApprovalConfirmationModal, InfoConfirmationModal } from './ConfirmationModal';
 
 export default function AdminUserList() {
     const [searchTerm, setSearchTerm] = useState('');
@@ -50,14 +45,14 @@ export default function AdminUserList() {
         error,
         refetch 
     } = useQuery({
-        queryKey: ['admin', 'users', { 
+        queryKey: queryKeys.admin.users({
             status: statusFilter !== 'all' ? statusFilter : undefined,
             search: searchTerm || undefined,
-            sort_by: sortBy, 
+            sort_by: sortBy,
             order: sortOrder,
             limit,
             offset
-        }],
+        }),
         queryFn: async () => {
             const params = new URLSearchParams();
             
@@ -87,7 +82,7 @@ export default function AdminUserList() {
         },
         onSuccess: (data, variables) => {
             toast.success(`User status updated to ${variables.status}`);
-            queryClient.invalidateQueries(['admin', 'users']);
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.usersBase() });
             setIsModalOpen(false);
         },
         onError: (error) => {
@@ -103,7 +98,7 @@ export default function AdminUserList() {
         },
         onSuccess: (data, variables) => {
             toast.success(`User role updated to ${variables.role}`);
-            queryClient.invalidateQueries(['admin', 'users']);
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.usersBase() });
             setIsModalOpen(false);
         },
         onError: (error) => {
@@ -119,7 +114,7 @@ export default function AdminUserList() {
         },
         onSuccess: () => {
             toast.success('User deleted successfully');
-            queryClient.invalidateQueries(['admin', 'users']);
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.usersBase() });
             setIsModalOpen(false);
         },
         onError: (error) => {
@@ -164,15 +159,7 @@ export default function AdminUserList() {
         }
     };
 
-    const handleSort = (column) => {
-        if (sortBy === column) {
-            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-        } else {
-            setSortBy(column);
-            setSortOrder('asc');
-        }
-        setOffset(0); // Reset pagination
-    };
+    // Status and role helper functions
 
     // Get status badge color
     const getStatusColor = (status) => {
@@ -203,7 +190,7 @@ export default function AdminUserList() {
                     <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div>
                     <div className="space-y-3">
                         {[...Array(5)].map((_, i) => (
-                            <div key={i} className="grid grid-cols-6 gap-4">
+                            <div key={`loading-skeleton-${i}`} className="grid grid-cols-6 gap-4">
                                 <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded"></div>
                                 <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded"></div>
                                 <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded"></div>
@@ -284,6 +271,7 @@ export default function AdminUserList() {
                                 setSearchTerm(e.target.value);
                                 setOffset(0); // Reset pagination on search
                             }}
+                            aria-label="Search users by username or email"
                             className="pl-10 pr-4 py-2 w-full border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                         />
                     </div>
@@ -540,8 +528,9 @@ export default function AdminUserList() {
                     <div className="space-y-4">
                         <p>Update status for <strong>{selectedUser?.username}</strong></p>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">New Status</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="modal-new-status">New Status</label>
                             <select
+                                id="modal-new-status"
                                 value={actionData.status}
                                 onChange={(e) => setActionData(prev => ({ ...prev, status: e.target.value }))}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md"
@@ -553,8 +542,9 @@ export default function AdminUserList() {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="modal-reason">Reason</label>
                             <textarea
+                                id="modal-reason"
                                 value={actionData.reason}
                                 onChange={(e) => setActionData(prev => ({ ...prev, reason: e.target.value }))}
                                 rows={3}
@@ -579,8 +569,9 @@ export default function AdminUserList() {
                     <div className="space-y-4">
                         <p>Update role for <strong>{selectedUser?.username}</strong></p>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">New Role</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="modal-new-role">New Role</label>
                             <select
+                                id="modal-new-role"
                                 value={actionData.role}
                                 onChange={(e) => setActionData(prev => ({ ...prev, role: e.target.value }))}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-md"

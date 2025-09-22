@@ -21,7 +21,9 @@ from web3.auto import w3
 from app import models, auth, schemas
 from app.database import get_db
 from app.utils.email import send_email
-from app.utils.token import create_access_token, verify_token
+from app.utils.security import create_access_token
+from app.utils.token import verify_token
+from app.utils.common import utcnow
 
 
 logger = logging.getLogger(__name__)
@@ -77,7 +79,7 @@ async def signup(
             level=1,
             streak=0,
             essence_balance=0,
-            created_at=datetime.utcnow()
+            created_at=utcnow()
         )
 
         db.add(new_user)
@@ -106,8 +108,7 @@ async def signup(
             The Impact ID Team
             """
         )
-
-        logger.info("New user registered: %s (ID: {new_user.id})", new_user.username)
+        logger.info("New user registered: %s (ID: %s)", new_user.username, new_user.id)
         return new_user
 
     except HTTPException as e:
@@ -117,14 +118,14 @@ async def signup(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with that email or username already exists."
-        ) from e
+    )
     except Exception as e:
         await db.rollback()
         logger.error("Registration error: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Registration service temporarily unavailable."
-        ) from e
+    )
 
 @router.post("/login", response_model=schemas.Token)
 async def login(
@@ -147,7 +148,7 @@ async def login(
         if not user or not auth.verify_password(form_data.password, user.hashed_password):
             # Log failed attempt
             client_ip = getattr(request.client, 'host', 'unknown') if request else 'unknown'
-            logger.warning("Failed login attempt for: %s from {client_ip}", form_data.username)
+            logger.warning("Failed login attempt for: %s from %s", form_data.username, client_ip)
 
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -185,17 +186,26 @@ async def login(
         access_token = create_access_token(data=token_data)
 
         # Update last login
-        user.last_active = datetime.utcnow()
+        user.last_active = utcnow()
         await db.commit()
+        logger.info("Successful login: %s (ID: %s)", user.username, user.id)
 
-        logger.info("Successful login: %s (ID: {user.id})", user.username)
+        # Derive expiry from token payload (unified token manager embeds expires_at)
+        try:
+            token_payload = verify_token(access_token)
+            expires_in = int((token_payload.expires_at - utcnow()).total_seconds())
+        except Exception:
+            # Fallback to 0 if parsing fails (should not normally happen)
+            expires_in = 0
 
         return {
             "access_token": access_token,
+            "refresh_token": None,
             "token_type": "bearer",
+            "expires_in": max(expires_in, 0),
+            "scope": token_payload.scopes if 'token_payload' in locals() and getattr(token_payload, 'scopes', None) else ["user"],
             "username": user.username,
-            "user_id": user.id,
-            "role": user.role
+            "user_id": user.id
         }
 
     except HTTPException as e:
@@ -205,7 +215,7 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication service temporarily unavailable"
-        ) from e
+    )
 
 @router.post("/wallet-login", response_model=schemas.Token)
 async def wallet_login(
@@ -223,7 +233,7 @@ async def wallet_login(
 
         if recovered_address.lower() != payload.address.lower():
             client_ip = getattr(request.client, 'host', 'unknown') if request else 'unknown'
-            logger.warning("Invalid wallet signature from %s for address {payload.address}", client_ip)
+            logger.warning("Invalid wallet signature from %s for address %s", client_ip, payload.address)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Signature verification failed"
@@ -241,20 +251,20 @@ async def wallet_login(
                 email=f"{payload.address.lower()}@wallet.impactid.local",
                 hashed_password=str(uuid.uuid4()),  # Random password for security
                 wallet_address=payload.address.lower(),
-                is_verified=True,  # Wallet ownership is proof of identity
+                email_verified=True,  # Wallet ownership is proof of identity
                 status="active",
                 role="user",
                 xp=0,
                 level=1,
                 streak=0,
                 essence_balance=0,
-                created_at=datetime.utcnow()
+                created_at=utcnow()
             )
             db.add(user)
             await db.commit()
             await db.refresh(user)
 
-            logger.info("New wallet user created: %s (Address: {payload.address})", user.username)
+            logger.info("New wallet user created: %s (Address: %s)", user.username, payload.address)
 
         # Check account status
         if user.status != "active":
@@ -275,17 +285,24 @@ async def wallet_login(
         access_token = create_access_token(data=token_data)
 
         # Update last login
-        user.last_active = datetime.utcnow()
+        user.last_active = utcnow()
         await db.commit()
+        logger.info("Wallet login successful: %s (Address: %s)", user.username, payload.address)
 
-        logger.info("Wallet login successful: %s (Address: {payload.address})", user.username)
+        try:
+            token_payload = verify_token(access_token)
+            expires_in = int((token_payload.expires_at - utcnow()).total_seconds())
+        except Exception:
+            expires_in = 0
 
         return {
             "access_token": access_token,
+            "refresh_token": None,
             "token_type": "bearer",
+            "expires_in": max(expires_in, 0),
+            "scope": token_payload.scopes if 'token_payload' in locals() and getattr(token_payload, 'scopes', None) else ["user"],
             "username": user.username,
-            "user_id": user.id,
-            "role": user.role
+            "user_id": user.id
         }
 
     except HTTPException as e:
@@ -295,7 +312,7 @@ async def wallet_login(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid signature or wallet authentication failed"
-        ) from e
+    )
 
 @router.get("/verify-email")
 async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
@@ -316,15 +333,14 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
         if user.is_verified:
             return {"message": "Email is already verified. You can log in now."}
 
-        # Verify email and activate account
-        user.is_verified = True
+        # Verify email and activate account (persist to actual column)
+        user.email_verified = True
         user.verification_token = None
         user.status = "active"
-        user.verified_at = datetime.utcnow()
+        user.verified_at = utcnow()
 
         await db.commit()
-
-        logger.info("Email verified for user: %s (ID: {user.id})", user.username)
+        logger.info("Email verified for user: %s (ID: %s)", user.username, user.id)
 
         return {
             "message": "Email verified successfully! You can now log in to your account.",
@@ -338,7 +354,7 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Email verification service temporarily unavailable"
-        ) from e
+    )
 
 # =========================
 # 👤 Profile Management
@@ -411,11 +427,11 @@ async def update_my_profile(
                 changes_made = True
 
         if changes_made:
-            current_user.updated_at = datetime.utcnow()
+            current_user.updated_at = utcnow()
             await db.commit()
             await db.refresh(current_user)
 
-            logger.info("Profile updated for user: %s (ID: {current_user.id})", current_user.username)
+            logger.info("Profile updated for user: %s (ID: %s)", current_user.username, current_user.id)
 
         return current_user
 
@@ -427,7 +443,7 @@ async def update_my_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Profile update service temporarily unavailable"
-        ) from e
+    )
 
 @router.get("/{username}", response_model=schemas.PublicUserProfile)
 async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
@@ -491,7 +507,7 @@ async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Profile service temporarily unavailable"
-        ) from e
+    )
 
 @router.get("/@me/stats", response_model=schemas.UserStats)
 async def get_my_stats(
@@ -502,7 +518,7 @@ async def get_my_stats(
     📊 Enhanced user statistics with comprehensive metrics.
     """
     try:
-        today = datetime.utcnow().date()
+        today = utcnow().date()
         week_ago = today - timedelta(days=7)
         month_ago = today - timedelta(days=30)
 
@@ -559,7 +575,7 @@ async def get_my_stats(
             essence_balance=current_user.essence_balance,
             current_streak=getattr(current_user, 'streak', 0),
             badges_earned=badge_count,
-            account_age_days=(datetime.utcnow() - current_user.created_at).days
+            account_age_days=(utcnow() - current_user.created_at).days
         )
 
     except Exception as e:
@@ -567,7 +583,7 @@ async def get_my_stats(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Statistics service temporarily unavailable"
-        ) from e
+    )
 
 # =========================
 # 🛡️ Password Management
@@ -664,7 +680,7 @@ async def reset_password(
 
         # Update password
         user.hashed_password = auth.hash_password(req.new_password)
-        user.updated_at = datetime.utcnow()
+        user.updated_at = utcnow()
         await db.commit()
 
         logger.info("Password reset completed for user: %s", user.username)
@@ -678,7 +694,7 @@ async def reset_password(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Password reset service temporarily unavailable"
-        ) from e
+    )
 
 @router.post("/change-password")
 async def change_password(
@@ -706,7 +722,7 @@ async def change_password(
 
         # Update password
         current_user.hashed_password = auth.hash_password(req.new_password)
-        current_user.updated_at = datetime.utcnow()
+        current_user.updated_at = utcnow()
         await db.commit()
 
         logger.info("Password changed for user: %s", current_user.username)
@@ -721,7 +737,7 @@ async def change_password(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Password change service temporarily unavailable"
-        ) from e
+    )
 
 # =========================
 # 🔗 Account Linking
@@ -745,7 +761,7 @@ async def link_wallet(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Signature verification failed"
-            ) from e
+            )
 
         # Check if wallet is already linked
         stmt = select(models.User).where(models.User.wallet_address == payload.address.lower())
@@ -763,10 +779,9 @@ async def link_wallet(
 
         # Link wallet to account
         current_user.wallet_address = payload.address.lower()
-        current_user.updated_at = datetime.utcnow()
+        current_user.updated_at = utcnow()
         await db.commit()
-
-        logger.info("Wallet linked to user: %s (Address: {payload.address})", current_user.username)
+        logger.info("Wallet linked to user: %s (Address: %s)", current_user.username, payload.address)
 
         return {"message": "Wallet linked successfully"}
 
@@ -778,7 +793,7 @@ async def link_wallet(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid signature or wallet linking failed"
-        ) from e
+    )
 
 @router.delete("/unlink-wallet")
 async def unlink_wallet(
@@ -797,10 +812,9 @@ async def unlink_wallet(
 
         wallet_address = current_user.wallet_address
         current_user.wallet_address = None
-        current_user.updated_at = datetime.utcnow()
+        current_user.updated_at = utcnow()
         await db.commit()
-
-        logger.info("Wallet unlinked from user: %s (Address: {wallet_address})", current_user.username)
+        logger.info("Wallet unlinked from user: %s (Address: %s)", current_user.username, wallet_address)
 
         return {"message": "Wallet unlinked successfully"}
 
@@ -812,7 +826,7 @@ async def unlink_wallet(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Wallet unlinking service temporarily unavailable"
-        ) from e
+    )
 
 # =========================
 # 🗑️ Account Management
@@ -843,7 +857,7 @@ async def delete_my_account(
             )
 
         # Soft delete with audit trail
-        deletion_timestamp = datetime.utcnow()
+        deletion_timestamp = utcnow()
         original_username = current_user.username
         original_email = current_user.email
 
@@ -857,8 +871,7 @@ async def delete_my_account(
         current_user.updated_at = deletion_timestamp
 
         await db.commit()
-
-        logger.info("Account deleted: %s (ID: {current_user.id}, Email: {original_email})", original_username)
+        logger.info("Account deleted: %s (ID: %s, Email: %s)", original_username, current_user.id, original_email)
 
         return {
             "message": "Account deleted successfully",
@@ -874,7 +887,7 @@ async def delete_my_account(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Account deletion service temporarily unavailable"
-        ) from e
+    )
 
 # =========================
 # 🔍 User Search & Discovery
@@ -933,7 +946,7 @@ async def search_users(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Search service temporarily unavailable"
-        ) from e
+    )
 
 # =========================
 # 📧 Email Management
@@ -986,4 +999,4 @@ async def resend_verification_email(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Email service temporarily unavailable"
-        ) from e
+    )

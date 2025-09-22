@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 from fastapi import HTTPException, status
 from jose import JWTError, jwt
 
+from app.utils.common import utcnow
+
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -67,11 +69,15 @@ class TokenConfig:
     require_secure_tokens: bool = True
 
     def __post_init__(self):
-        """__post_init__ function."""
-        if not self.secret_key or self.secret_key == "a-very-bad-default-secret-key":
-            raise RuntimeError("SECURITY ERROR: SECRET_KEY is not set or is insecure.")
-        if len(self.secret_key) < 32:
-            raise RuntimeError("SECURITY ERROR: SECRET_KEY must be at least 32 characters.")
+        """Validate secret key security; be strict in production, warn in development/test."""
+        env = os.getenv("ENVIRONMENT", "development").lower()
+        if (not self.secret_key or self.secret_key == "a-very-bad-default-secret-key" or len(self.secret_key) < 32):
+            if env in ("production", "staging"):
+                raise RuntimeError("SECURITY ERROR: SECRET_KEY is missing or too short (>=32 chars required) in production/staging.")
+            # Development fallback – generate ephemeral secret to avoid hard crashes
+            generated = base64.urlsafe_b64encode(os.urandom(48)).decode()
+            logger.warning("⚠️ Insecure or missing SECRET_KEY detected in %s environment. Generated ephemeral key; set a strong SECRET_KEY env var for production.", env)
+            self.secret_key = generated
 
 @dataclass
 class TokenPayload:
@@ -182,7 +188,7 @@ class TokenSecurityManager:
 
         # Determine expiration
         if custom_expiry:
-            expires_at = datetime.utcnow() + custom_expiry
+            expires_at = utcnow() + custom_expiry
         else:
             expires_at = self._get_default_expiry(token_type)
 
@@ -195,7 +201,7 @@ class TokenSecurityManager:
             scopes=scopes or [TokenScope.USER.value],
             token_type=token_type,
             session_id=session_id,
-            issued_at=datetime.utcnow(),
+            issued_at=utcnow(),
             expires_at=expires_at,
             ip_address=getattr(security_context, "ip_address", None) if security_context else None,
             user_agent=getattr(security_context, "user_agent", None) if security_context else None,
@@ -212,7 +218,9 @@ class TokenSecurityManager:
             self._manage_concurrent_sessions(user_id, session_id)
 
         # Log token creation
-        logger.info("Token created: user_id=%s, type={token_type.value}, session_id={session_id}", user_id)
+        logger.info(
+            "Token created: user_id=%s type=%s session_id=%s", user_id, token_type.value, session_id
+        )
 
         return token
 
@@ -236,7 +244,7 @@ class TokenSecurityManager:
             payload = TokenPayload.from_dict(payload_dict)
 
             # Basic validation
-            if datetime.utcnow() > payload.expires_at:
+            if utcnow() > payload.expires_at:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Token has expired"
@@ -288,7 +296,7 @@ class TokenSecurityManager:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"
-            ) from e
+            )
 
     def refresh_token(self, refresh_token: str, security_context: Dict[str, Any] = None) -> Dict[str, str]:
         """
@@ -349,14 +357,14 @@ class TokenSecurityManager:
                 options={"verify_exp": False}  # Allow expired tokens for blacklisting
             )
             expires_at = datetime.fromtimestamp(payload_dict["expires_at"])
-            ttl = int((expires_at - datetime.utcnow()).total_seconds())
+            ttl = int((expires_at - utcnow()).total_seconds())
 
             if ttl > 0:
                 # Store in blacklist with TTL
                 token_hash = hashlib.sha256(token.encode()).hexdigest()
                 blacklist_data = {
                     "reason": reason,
-                    "blacklisted_at": datetime.utcnow().isoformat(),
+                    "blacklisted_at": utcnow().isoformat(),
                     "user_id": getattr(payload_dict, "user_id", None),
                     "session_id": getattr(payload_dict, "session_id", None)
                 }
@@ -372,7 +380,7 @@ class TokenSecurityManager:
                 if session_id:
                     self._invalidate_session(session_id)
 
-                logger.info("Token blacklisted: reason=%s, session_id={session_id}", reason)
+                logger.info("Token blacklisted: reason=%s session_id=%s", reason, session_id)
                 return True
 
         except Exception as e:
@@ -400,15 +408,14 @@ class TokenSecurityManager:
             session_data = self.redis_client.get(key)
             if session_data:
                 session_info = json.loads(session_data)
-                token = getattr(session_info, "token", None)
+                token = session_info.get("token") if isinstance(session_info, dict) else getattr(session_info, "token", None)
                 if token:
                     self.blacklist_token(token, "session_revocation")
+            # Delete session (always delete even if no session_data to avoid stale keys)
+            self.redis_client.delete(key)
+            revoked_count += 1
 
-                # Delete session
-                self.redis_client.delete(key)
-                revoked_count += 1
-
-        logger.info("Revoked %s sessions for user {user_id}", revoked_count)
+        logger.info("Revoked %s sessions for user %s", revoked_count, user_id)
         return revoked_count
 
     def get_user_sessions(self, user_id: int) -> List[Dict[str, Any]]:
@@ -442,7 +449,7 @@ class TokenSecurityManager:
 
     def _get_default_expiry(self, token_type: TokenType) -> datetime:
         """Get default expiry time for token type."""
-        now = datetime.utcnow()
+        now = utcnow()
 
         expiry_map = {
             TokenType.ACCESS: timedelta(minutes=self.config.access_token_expire_minutes),
@@ -458,7 +465,7 @@ class TokenSecurityManager:
 
     def _generate_session_id(self, user_id: int, security_context: Dict[str, Any] = None) -> str:
         """Generate unique session ID."""
-        timestamp = str(datetime.utcnow().timestamp())
+        timestamp = str(utcnow().timestamp())
         random_part = secrets.token_hex(16)
         context_part = ""
 
@@ -478,7 +485,7 @@ class TokenSecurityManager:
             "user_id": payload.user_id,
             "token": token,
             "created_at": payload.issued_at.isoformat(),
-            "last_seen": datetime.utcnow().isoformat(),
+            "last_seen": utcnow().isoformat(),
             "ip_address": payload.ip_address,
             "user_agent": payload.user_agent,
             "device_fingerprint": payload.device_fingerprint,
@@ -486,7 +493,7 @@ class TokenSecurityManager:
         }
 
         # Store with expiration
-        ttl = int((payload.expires_at - datetime.utcnow()).total_seconds())
+        ttl = int((payload.expires_at - utcnow()).total_seconds())
         if ttl > 0:
             self.redis_client.setex(
                 f"session:{payload.user_id}:{session_id}",
@@ -542,7 +549,7 @@ class TokenSecurityManager:
             session_data = self.redis_client.get(key)
             if session_data:
                 session_info = json.loads(session_data)
-                session_info["last_seen"] = datetime.utcnow().isoformat()
+                session_info["last_seen"] = utcnow().isoformat()
 
                 # Update with same TTL
                 ttl = self.redis_client.ttl(key)
@@ -574,10 +581,10 @@ class TokenSecurityManager:
         if ip_address not in self.failed_verifications:
             self.failed_verifications[ip_address] = []
 
-        self.failed_verifications[ip_address].append(datetime.utcnow())
+        self.failed_verifications[ip_address].append(utcnow())
 
         # Keep only last hour of failures
-        cutoff = datetime.utcnow() - timedelta(hours=1)
+        cutoff = utcnow() - timedelta(hours=1)
         self.failed_verifications[ip_address] = [
             timestamp for timestamp in self.failed_verifications[ip_address]
             if timestamp > cutoff
@@ -660,13 +667,8 @@ def verify_token(
             security_context=security_context
         )
     except HTTPException as e:
-        try:
-
-            pass
-
-        except Exception as e:
-
-            raise HTTPException(status_code=500, detail="Error") from e
+        # Propagate original HTTPException without invalid chaining pattern
+        raise
 
 def refresh_tokens(refresh_token: str, security_context: Dict[str, Any] = None) -> Dict[str, str]:
     """🔄 Refresh access and refresh tokens."""

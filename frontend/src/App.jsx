@@ -1,34 +1,40 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { ErrorBoundary } from 'react-error-boundary';
+import RouteErrorBoundary from './errors/RouteErrorBoundary';
 import { AnimatePresence } from "framer-motion";
 
 // Enhanced imports
 import { AuthProvider } from './utils/AuthContext';
 import { ThemeProvider } from './ThemeContext';
+import A11yInspector from './dev/A11yInspector';
 import ProtectedRoute from './utils/protectedRoute';
 import WebSocketManager from './WebSocketManager';
 
-// Lazy load pages for better performance
-const DashboardPage = lazy(() => import('./DashboardPage'));
-const AdminDashboardPage = lazy(() => import('./AdminDashboardPage'));
-const LoginPage = lazy(() => import('./auth/LoginPage'));
-const RegisterPage = lazy(() => import('./auth/RegisterPage'));
-const OnboardingPage = lazy(() => import('./OnboardingPage'));
-const VerifyEmailPage = lazy(() => import('./auth/VerifyEmailPage'));
-const ForgotPasswordPage = lazy(() => import('./auth/ForgotPasswordPage'));
-const ResetPasswordPage = lazy(() => import('./auth/ResetPasswordPage'));
-const PublicProfilePage = lazy(() => import('./user/PublicProfilePage'));
-const TaskDetailPage = lazy(() => import('./tasks/TaskDetailPage'));
-const TaskListPage = lazy(() => import('./tasks/TaskList'));
-const SubmissionHistoryPage = lazy(() => import('./tasks/SubmissionHistoryPage'));
-const WeavingLoomPage = lazy(() => import('./features/WeavingLoomPage'));
-const BadgeListPage = lazy(() => import('./user/BadgeList'));
-const LeaderboardPage = lazy(() => import('./user/Leaderboard'));
-const QuizPage = lazy(() => import('./tasks/QuizPage'));
+// Centralized chunk registry for consistency (imported functions reused for prefetch)
+import { routeChunks, prefetchRouteChunk, prefetchMany, prefetchHeuristics } from './routes/routeChunks';
+import { useRoutePrefetch, schedulePrefetch } from './hooks/useRoutePrefetch';
+
+// Lazy wrappers referencing registry (ensures single dynamic import site per chunk)
+const DashboardPage = lazy(routeChunks.dashboard);
+const AdminDashboardPage = lazy(routeChunks.admin);
+const LoginPage = lazy(routeChunks.login);
+const RegisterPage = lazy(routeChunks.register);
+const OnboardingPage = lazy(routeChunks.onboarding);
+const VerifyEmailPage = lazy(routeChunks.verifyEmail);
+const ForgotPasswordPage = lazy(routeChunks.forgotPassword);
+const ResetPasswordPage = lazy(routeChunks.resetPassword);
+const PublicProfilePage = lazy(routeChunks.profile);
+const TaskDetailPage = lazy(routeChunks.taskDetail);
+const TaskListPage = lazy(routeChunks.tasks);
+const SubmissionHistoryPage = lazy(routeChunks.submissions);
+const WeavingLoomPage = lazy(routeChunks.weaving);
+const BadgeListPage = lazy(routeChunks.badges);
+const LeaderboardPage = lazy(routeChunks.leaderboard);
+const QuizPage = lazy(routeChunks.quiz);
 
 // Enhanced React Query client with safer error handling
 const queryClient = new QueryClient({
@@ -266,17 +272,43 @@ function AnimatedRoutes() {
 }
 
 function App() {
+  // Attach delegated prefetch listeners
+  useRoutePrefetch();
+
+  // Heuristic idle prefetch based on current path
+  useEffect(() => {
+    const path = window.location.pathname;
+    const heuristicKeys = Object.entries(prefetchHeuristics).find(([prefix]) => path.startsWith(prefix))?.[1];
+    if (heuristicKeys) schedulePrefetch(heuristicKeys, { delay: 500 });
+  }, []);
+
+  // Developer debug helpers
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      const api = {
+        prefetch: (key) => prefetchRouteChunk(key),
+        prefetchMany: (keys) => prefetchMany(keys),
+        loadedChunks: () => Object.keys(performance.getEntriesByType('resource').reduce((acc, r) => { if (/chunk|quiz|tasks|dashboard/i.test(r.name)) acc[r.name] = true; return acc; }, {}))
+      };
+  console.log('%c[Perf] Route prefetch API available as window.__IMPACT_PERF__', 'color:#2563eb');
+      window.__IMPACT_PERF__ = api;
+    }
+  }, []);
+
   return (
     <ErrorBoundary FallbackComponent={ErrorFallback}>
-      <QueryClientProvider client={queryClient}> 
-        <ThemeProvider>
-          <AuthProvider>
-            <Router>
+      <Router>
+        <QueryClientProvider client={queryClient}> 
+          <ThemeProvider>
+            <AuthProvider>
               <div className="min-h-screen bg-gray-100 dark:bg-gray-900 transition-colors duration-200">
                 <WebSocketManager />
-                <Suspense fallback={<LoadingSpinner />}>
-                  <AnimatedRoutes />
-                </Suspense>
+                <RouteErrorBoundary>
+                  <Suspense fallback={<LoadingSpinner />}>
+                    <AnimatedRoutes />
+                  </Suspense>
+                </RouteErrorBoundary>
+                {import.meta.env.DEV && <A11yInspector />}
               </div>
 
               <Toaster 
@@ -317,10 +349,10 @@ function App() {
               {import.meta.env.DEV && (
                 <ReactQueryDevtools initialIsOpen={false} position="bottom-right" />
               )}
-            </Router>
-          </AuthProvider>
-        </ThemeProvider>
-      </QueryClientProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </Router>
     </ErrorBoundary>
   );
 }

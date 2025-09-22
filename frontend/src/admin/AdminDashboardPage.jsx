@@ -12,6 +12,7 @@ import {
     ArrowTrendingUpIcon
 } from '@heroicons/react/24/outline';
 import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryKeys';
 import Layout from '../tasks/Layout';
 import AdminSubmissions from '../admin/AdminSubmissions';
 import AdminCreateTask from '../admin/AdminCreateTask';
@@ -37,7 +38,7 @@ export default function AdminDashboardPage() {
 
     // Fetch dashboard metrics from your backend
     const { data: dashboardData, isLoading, isError } = useQuery({
-        queryKey: ['adminDashboard'],
+        queryKey: queryKeys.admin.dashboard(),
         queryFn: fetchDashboardData,
         refetchInterval: 30000, // Refresh every 30 seconds
         onError: (error) => {

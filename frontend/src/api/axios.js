@@ -1,5 +1,6 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { authEvents, AUTH_EVENT } from '../utils/authEvents';
 
 // ================================
 // 🌐 CORRECTED AXIOS CONFIGURATION
@@ -7,8 +8,26 @@ import toast from 'react-hot-toast';
 
 // Environment configuration
 const isDevelopment = import.meta.env.DEV;
-// ✅ FIXED: Removed /api from base URL since backend includes it in routes
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+const isTest = import.meta.env.MODE === 'test';
+const isBrowser = typeof window !== 'undefined';
+
+// Derive a robust API base URL with fallback strategy:
+// 1. Explicit VITE_API_BASE_URL env
+// 2. Browser origin (when frontend served by same host) — no trailing slash
+// 3. Development fallback http://localhost:8000
+function computeApiBaseUrl() {
+    const envUrl = (import.meta.env.VITE_API_BASE_URL || '').trim();
+    if (envUrl) return envUrl.replace(/\/$/, '');
+    if (isBrowser && window.location?.origin) return window.location.origin.replace(/\/$/, '');
+    return 'http://localhost:8000';
+}
+
+export const getApiBaseUrl = () => API_BASE_URL; // external helper (service workers, etc.)
+
+const API_BASE_URL = computeApiBaseUrl();
+if (isDevelopment && !isTest) {
+    console.log('[axios] Using API base URL:', API_BASE_URL);
+}
 
 // Create enhanced Axios instance with comprehensive configuration
 const apiClient = axios.create({
@@ -91,7 +110,7 @@ apiClient.interceptors.request.use(
         config.headers['X-Request-ID'] = generateRequestId();
         
         // Log request in development
-        if (isDevelopment) {
+        if (isDevelopment && !isTest) {
             console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`, {
                 headers: config.headers,
                 data: config.data,
@@ -120,7 +139,7 @@ apiClient.interceptors.response.use(
             const duration = new Date() - response.config.metadata.startTime;
             response.duration = duration;
             
-            if (isDevelopment) {
+            if (isDevelopment && !isTest) {
                 console.log(`✅ API Response: ${response.config.method?.toUpperCase()} ${response.config.url} (${duration}ms)`, {
                     status: response.status,
                     data: response.data
@@ -141,7 +160,7 @@ apiClient.interceptors.response.use(
     async (error) => {
         const originalRequest = error.config;
         
-        if (isDevelopment) {
+        if (isDevelopment && !isTest) {
             console.error('❌ API Error:', {
                 url: originalRequest?.url,
                 method: originalRequest?.method,
@@ -183,12 +202,14 @@ apiClient.interceptors.response.use(
                 
                 storeToken(newToken, rememberMe);
                 processQueue(null, newToken);
+                authEvents.emit(AUTH_EVENT.TOKEN_REFRESH, { token: newToken });
                 
                 originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
                 return apiClient(originalRequest);
                 
             } catch (refreshError) {
                 processQueue(refreshError, null);
+                authEvents.emit(AUTH_EVENT.TOKEN_REFRESH_FAILED, { error: refreshError });
                 await handleAuthenticationFailure(refreshError);
                 return Promise.reject(refreshError);
             } finally {
@@ -299,17 +320,13 @@ const handleUnknownError = (error) => {
 
 const handleAuthenticationFailure = async (error) => {
     clearStoredToken();
-    
+    // Emit session expired event (central logic in AuthContext will react & redirect)
+    authEvents.emit(AUTH_EVENT.SESSION_EXPIRED, { reason: 'auth_failure' });
+
+    // Present a single persistent toast (id ensures de-duplication)
     if (!error.config?.url?.includes('/api/auth/refresh')) {
-        toast.error('Your session has expired. Please log in again.');
+        toast.error('Your session has expired. Please log in again.', { id: 'session-expired' });
     }
-    
-    setTimeout(() => {
-        const currentPath = window.location.pathname;
-        if (!['/login', '/register', '/'].includes(currentPath)) {
-            window.location.href = '/login';
-        }
-    }, 1000);
 };
 
 // ================================
@@ -415,7 +432,7 @@ const stopConnectionMonitoring = () => {
 };
 
 // Start monitoring in production
-if (!isDevelopment) {
+if (!isDevelopment && !isTest) {
     startConnectionMonitoring();
 }
 
@@ -437,32 +454,43 @@ export default apiClient;
 // 🔍 ENHANCED CONNECTION TEST
 // ================================
 
+let connectionAttempt = 0;
+const maxConnectionAttempts = 5;
+
 const testConnection = async () => {
     try {
-        console.log('🔍 Testing API connection...');
-        console.log('📍 Base URL:', API_BASE_URL);
-        
-        // Test health endpoint
-        const healthResponse = await apiClient.get('/health');
-        console.log('✅ Health check successful:', healthResponse.data);
-        
-        // Test API info endpoint if available
-        try {
-            const infoResponse = await apiClient.get('/');
-            console.log('✅ API info successful:', infoResponse.data);
-        } catch (infoError) {
-            console.log('ℹ️ API info endpoint not available (normal in some setups)');
+        if (isDevelopment) {
+            console.log('🔍 Testing API connection (attempt %d)...', connectionAttempt + 1);
+            console.log('📍 Base URL:', API_BASE_URL);
         }
-        
+
+        const healthResponse = await apiClient.get('/health', { timeout: 4000 });
+        if (isDevelopment) console.log('✅ Health check successful:', healthResponse.data);
+
+        // Optional root info
+        try {
+            await apiClient.get('/', { timeout: 3000 });
+        } catch {
+            // ignore
+        }
+        connectionAttempt = 0; // reset after success
     } catch (error) {
-        console.error('❌ API connection failed:', error);
-        console.log('📝 Troubleshooting:');
-        console.log('   1. Make sure your backend is running on port 8000');
-        console.log('   2. Check if CORS is properly configured');
-        console.log('   3. Verify the backend health endpoint: http://localhost:8000/health');
-        console.log('   4. Check your .env file for VITE_API_BASE_URL');
+        if (isDevelopment) {
+            console.error('❌ API connection failed:', error?.message || error);
+            console.log('📝 Troubleshooting (attempt %d):', connectionAttempt + 1);
+            console.log('   1. Backend running?');
+            console.log('   2. CORS / network ok?');
+            console.log('   3. Check VITE_API_BASE_URL or proxy config.');
+        }
+        if (connectionAttempt < maxConnectionAttempts - 1) {
+            connectionAttempt += 1;
+            const delay = Math.min(1000 * 2 ** connectionAttempt, 15000);
+            setTimeout(testConnection, delay);
+        }
     }
 };
 
-// Test connection on load
-testConnection();
+// Kick off initial connection probe (non-blocking)
+if (isBrowser && !isTest) {
+    testConnection();
+}

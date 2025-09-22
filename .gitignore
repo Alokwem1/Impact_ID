@@ -1,0 +1,18 @@
+# Root ignore (delegates per-project specifics to sub .gitignore files)
+# Environment
+.env
+*.env
+
+# Databases (dev SQLite)
+impact.db
+impact.db-wal
+impact.db-shm
+
+# Node / Python caches (extra safety)
+node_modules/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db

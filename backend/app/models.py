@@ -15,13 +15,14 @@ from sqlalchemy import (
 from sqlalchemy.ext.hybrid import hybrid_property
 
 from app.database import Base
+from app.utils.common import utcnow, TableNames, CascadeOptions
 # ================================
 # 👤 ENHANCED USER MODEL
 # ================================
 
 class User(Base):
     """User class for Impact ID application."""
-    __tablename__ = "users"
+    __tablename__ = TableNames.USERS
 
     # Core identity
     id = Column(Integer, primary_key=True, index=True)
@@ -30,7 +31,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     last_active = Column(DateTime, nullable=True)
     last_login = Column(DateTime, nullable=True)
 
@@ -73,15 +74,27 @@ class User(Base):
     total_login_count = Column(Integer, default=0)
     total_session_time = Column(Integer, default=0)  # in seconds
     referral_code = Column(String(20), unique=True, nullable=True)
-    referred_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    referred_by = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=True)
 
     # Relationships
-    task_submissions = relationship("TaskSubmission", back_populates="user", cascade="all, delete-orphan")
-    badges = relationship("UserBadge", back_populates="user", cascade="all, delete-orphan")
-    reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
-    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
-    activities = relationship("Activity", back_populates="user", cascade="all, delete-orphan")
-    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    task_submissions = relationship(
+        "TaskSubmission",
+        back_populates="user",
+        cascade=CascadeOptions.ALL_DELETE_ORPHAN,
+        foreign_keys="TaskSubmission.user_id",
+    )
+    badges = relationship(
+        "UserBadge",
+        back_populates="user",
+        cascade=CascadeOptions.ALL_DELETE_ORPHAN,
+        foreign_keys="UserBadge.user_id",
+    )
+    reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade=CascadeOptions.ALL_DELETE_ORPHAN)
+    sessions = relationship("UserSession", back_populates="user", cascade=CascadeOptions.ALL_DELETE_ORPHAN)
+    activities = relationship("Activity", back_populates="user", cascade=CascadeOptions.ALL_DELETE_ORPHAN)
+    notifications = relationship("Notification", back_populates="user", cascade=CascadeOptions.ALL_DELETE_ORPHAN)
+    # For TaskLog back_populates
+    task_logs = relationship("TaskLog", back_populates="user", cascade=CascadeOptions.ALL_DELETE_ORPHAN)
 
     # Self-referential relationship for referrals
     referrals = relationship("User", backref="referrer", remote_side=[id])
@@ -95,6 +108,11 @@ class User(Base):
     def badge_count(self):
         """Get total badge count."""
         return len(self.badges)
+
+    @hybrid_property
+    def is_verified(self):
+        """Compatibility property for routes expecting 'is_verified'."""
+        return self.email_verified
 
     def __repr__(self):
         """__repr__ function."""
@@ -137,9 +155,9 @@ class Task(Base):
     scheduled_end = Column(DateTime, nullable=True)
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, nullable=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False)
 
     # Analytics
     completion_count = Column(Integer, default=0)
@@ -150,7 +168,9 @@ class Task(Base):
     prerequisites = Column(JSON, nullable=True)  # [task_id1, task_id2]
 
     # Relationships
-    submissions = relationship("TaskSubmission", back_populates="task", cascade="all, delete-orphan")
+    submissions = relationship("TaskSubmission", back_populates="task", cascade=CascadeOptions.ALL_DELETE_ORPHAN)
+    # For TaskLog back_populates
+    task_logs = relationship("TaskLog", back_populates="task", cascade=CascadeOptions.ALL_DELETE_ORPHAN)
     created_by = relationship("User", foreign_keys=[created_by_user_id])
 
     def __repr__(self):
@@ -167,7 +187,7 @@ class TaskSubmission(Base):
 
     # Core fields
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, index=True)
 
     # Submission data
@@ -180,7 +200,7 @@ class TaskSubmission(Base):
     score = Column(Float, nullable=True)  # 0-100
 
     # Timing
-    submitted_at = Column(DateTime, default=datetime.utcnow)
+    submitted_at = Column(DateTime, default=utcnow)
     reviewed_at = Column(DateTime, nullable=True)
     time_spent_minutes = Column(Integer, nullable=True)
 
@@ -190,7 +210,7 @@ class TaskSubmission(Base):
 
     # Metadata
     attempt_number = Column(Integer, default=1)
-    reviewed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_by_user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="task_submissions", foreign_keys=[user_id])
@@ -233,13 +253,13 @@ class Badge(Base):
 
     # Status
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Analytics
     awarded_count = Column(Integer, default=0)
 
     # Relationships
-    users = relationship("UserBadge", back_populates="badge", cascade="all, delete-orphan")
+    users = relationship("UserBadge", back_populates="badge", cascade=CascadeOptions.ALL_DELETE_ORPHAN)
 
     def __repr__(self):
         """__repr__ function."""
@@ -255,17 +275,17 @@ class UserBadge(Base):
 
     # Core fields
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
     badge_id = Column(Integer, ForeignKey("badges.id"), nullable=False, index=True)
 
     # Award details
-    awarded_at = Column(DateTime, default=datetime.utcnow)
+    awarded_at = Column(DateTime, default=utcnow)
     awarded_reason = Column(Text, nullable=True)
     progress_percentage = Column(Float, default=100.0)  # For partial progress badges
 
     # Metadata
     awarded_by_system = Column(Boolean, default=True)
-    awarded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    awarded_by_user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="badges", foreign_keys=[user_id])
@@ -291,11 +311,11 @@ class UserSession(Base):
 
     # Core fields
     id = Column(String(128), primary_key=True)  # UUID session ID
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
 
     # Session data
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_seen = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    last_seen = Column(DateTime, default=utcnow)
     expires_at = Column(DateTime, nullable=False)
 
     # Device & Location
@@ -324,11 +344,11 @@ class PasswordResetToken(Base):
 
     # Core fields
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
     token = Column(String(256), unique=True, nullable=False)
 
     # Status
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     expires_at = Column(DateTime, nullable=False)
     used = Column(Boolean, default=False)
     used_at = Column(DateTime, nullable=True)
@@ -353,7 +373,7 @@ class Activity(Base):
 
     # Core fields
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
     username = Column(String(50), nullable=False)  # Denormalized for performance
 
     # Activity data
@@ -363,7 +383,7 @@ class Activity(Base):
 
     # Visibility
     is_public = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
     # Social features
     reaction_counts = Column(JSON, default=dict)  # {"like": 5, "love": 2}
@@ -371,7 +391,7 @@ class Activity(Base):
 
     # Relationships
     user = relationship("User", back_populates="activities")
-    reactions = relationship("ActivityReaction", back_populates="activity", cascade="all, delete-orphan")
+    reactions = relationship("ActivityReaction", back_populates="activity", cascade=CascadeOptions.ALL_DELETE_ORPHAN)
 
     def __repr__(self):
         """__repr__ function."""
@@ -388,11 +408,11 @@ class ActivityReaction(Base):
     # Core fields
     id = Column(Integer, primary_key=True, index=True)
     activity_id = Column(Integer, ForeignKey("activities.id"), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
 
     # Reaction data
     reaction_type = Column(String(20), nullable=False)  # like, love, wow, laugh, angry, sad
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Relationships
     activity = relationship("Activity", back_populates="reactions")
@@ -417,7 +437,7 @@ class Notification(Base):
 
     # Core fields
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
 
     # Notification content
     title = Column(String(200), nullable=False)
@@ -430,7 +450,7 @@ class Notification(Base):
 
     # Status
     is_read = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
     read_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=True)
 
@@ -454,7 +474,7 @@ class AdminActionLog(Base):
 
     # Core fields
     id = Column(Integer, primary_key=True, index=True)
-    admin_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    admin_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
 
     # Action details
     action = Column(String(100), nullable=False)
@@ -466,7 +486,7 @@ class AdminActionLog(Base):
     meta_data = Column(JSON, nullable=True, name="metadata")
 
     # Timing
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
     # Security
     ip_address = Column(String(45), nullable=True)
@@ -511,7 +531,7 @@ class ImpactThread(Base):
     average_essence_earned = Column(Float, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
     processed_at = Column(DateTime, nullable=True)
     last_woven_at = Column(DateTime, nullable=True)
 
@@ -539,7 +559,7 @@ class ThreadWeavingLog(Base):
 
     # Core fields
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
     thread_id = Column(Integer, ForeignKey("impact_threads.id"), nullable=False, index=True)
 
     # Weaving data
@@ -553,7 +573,7 @@ class ThreadWeavingLog(Base):
     difficulty_rating = Column(Integer, nullable=True)  # User's perceived difficulty 1-5
 
     # Timing
-    woven_at = Column(DateTime, default=datetime.utcnow)
+    woven_at = Column(DateTime, default=utcnow)
     time_spent_seconds = Column(Integer, nullable=True)
 
     # Relationships
@@ -574,7 +594,7 @@ class UserAnalytics(Base):
 
     # Core fields
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False, index=True)
     date = Column(Date, nullable=False, index=True)
 
     # Daily metrics
@@ -621,7 +641,7 @@ class SearchIndex(Base):
     keywords = Column(JSON, nullable=True)  # Extracted keywords
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
 
@@ -650,7 +670,7 @@ class SystemMetrics(Base):
     meta_data = Column(JSON, nullable=True)
 
     # Timing
-    recorded_at = Column(DateTime, default=datetime.utcnow, index=True)
+    recorded_at = Column(DateTime, default=utcnow, index=True)
 
     def __repr__(self):
         """__repr__ function."""
@@ -676,10 +696,10 @@ class TaskLog(Base):
     __tablename__ = "task_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id", ondelete="CASCADE"), nullable=False)
     task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
     status = Column(String(20), default="pending", nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
 
     # Relationships
     user = relationship("User", back_populates="task_logs")
@@ -691,12 +711,12 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    admin_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    admin_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id"), nullable=False)
     action = Column(String(100), nullable=False)
     target_type = Column(String(50), nullable=False)
     target_id = Column(Integer, nullable=False)
     details = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
 
     # Relationships
     admin = relationship("User")
@@ -707,12 +727,12 @@ class WeaveSubmission(Base):
     __tablename__ = "weave_submissions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey(f"{TableNames.USERS}.id", ondelete="CASCADE"), nullable=False)
     thread_id = Column(Integer, ForeignKey("impact_threads.id", ondelete="CASCADE"), nullable=False)
     category = Column(String(50), nullable=False)
     insight = Column(Text, nullable=False)
     essence_earned = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
 
     # Relationships
     user = relationship("User")

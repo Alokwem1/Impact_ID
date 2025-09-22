@@ -241,36 +241,36 @@ export default function LoginPage() {
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex flex-col justify-center items-center p-4">
-            <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-6 border border-gray-100">
+            <main className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-6 border border-gray-100" aria-labelledby="login-heading">
                 {/* Header */}
                 <div className="text-center">
-                    <div className="mx-auto h-16 w-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full flex items-center justify-center mb-4">
+                    <div className="mx-auto h-16 w-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full flex items-center justify-center mb-4" aria-hidden="true">
                         <SparklesIcon className="h-8 w-8 text-white" />
                     </div>
-                    <h2 className="text-3xl font-bold text-gray-900">Welcome Back</h2>
-                    <p className="mt-2 text-sm text-gray-600">Log in to your Impact ID account</p>
+                    <h1 id="login-heading" className="text-3xl font-bold text-gray-900">Welcome Back</h1>
+                    <p className="mt-2 text-sm text-gray-600" id="login-instructions">Log in to your Impact ID account</p>
                 </div>
 
                 {/* Success Message */}
                 {success && (
-                    <div className="flex items-center space-x-2 p-4 bg-green-50 border border-green-200 rounded-lg">
-                        <CheckCircleIcon className="h-5 w-5 text-green-600 flex-shrink-0" />
+                    <div className="flex items-center space-x-2 p-4 bg-green-50 border border-green-200 rounded-lg" role="status" aria-live="polite">
+                        <CheckCircleIcon className="h-5 w-5 text-green-600 flex-shrink-0" aria-hidden="true" />
                         <p className="text-green-800 text-sm">{success}</p>
                     </div>
                 )}
 
                 {/* Error Messages */}
                 {errors.general && (
-                    <div className="flex items-center space-x-2 p-4 bg-red-50 border border-red-200 rounded-lg">
-                        <ExclamationTriangleIcon className="h-5 w-5 text-red-600 flex-shrink-0" />
+                    <div className="flex items-center space-x-2 p-4 bg-red-50 border border-red-200 rounded-lg" role="alert" aria-live="assertive">
+                        <ExclamationTriangleIcon className="h-5 w-5 text-red-600 flex-shrink-0" aria-hidden="true" />
                         <p className="text-red-800 text-sm">{errors.general}</p>
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="space-y-5">
+                <form onSubmit={handleSubmit} className="space-y-5" aria-describedby="login-instructions" noValidate>
                     {/* Username/Email Field */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label htmlFor="login-username" className="block text-sm font-medium text-gray-700 mb-1">
                             Username or Email
                         </label>
                         <div className="relative">
@@ -280,6 +280,7 @@ export default function LoginPage() {
                             <input
                                 type="text"
                                 name="username"
+                                id="login-username"
                                 placeholder="Enter your username or email"
                                 value={credentials.username}
                                 onChange={handleChange}
@@ -290,14 +291,16 @@ export default function LoginPage() {
                                 }`}
                                 required
                                 autoComplete="username"
+                                aria-invalid={!!errors.username}
+                                aria-describedby={errors.username ? 'username-error' : undefined}
                             />
                         </div>
-                        {errors.username && <p className="text-red-500 text-xs mt-1">{errors.username}</p>}
+                        {errors.username && <p id="username-error" className="text-red-500 text-xs mt-1">{errors.username}</p>}
                     </div>
 
                     {/* Password Field */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label htmlFor="login-password" className="block text-sm font-medium text-gray-700 mb-1">
                             Password
                         </label>
                         <div className="relative">
@@ -307,6 +310,7 @@ export default function LoginPage() {
                             <input
                                 type={showPassword ? "text" : "password"}
                                 name="password"
+                                id="login-password"
                                 placeholder="Enter your password"
                                 value={credentials.password}
                                 onChange={handleChange}
@@ -317,6 +321,8 @@ export default function LoginPage() {
                                 }`}
                                 required
                                 autoComplete="current-password"
+                                aria-invalid={!!errors.password}
+                                aria-describedby={errors.password ? 'password-error' : undefined}
                             />
                             <button
                                 type="button"
@@ -327,7 +333,7 @@ export default function LoginPage() {
                                 {showPassword ? <EyeSlashIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
                             </button>
                         </div>
-                        {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
+                        {errors.password && <p id="password-error" className="text-red-500 text-xs mt-1">{errors.password}</p>}
                     </div>
 
                     {/* Remember Me & Forgot Password */}
@@ -374,7 +380,7 @@ export default function LoginPage() {
                 </form>
 
                 {/* Divider */}
-                <div className="relative flex py-2 items-center">
+                <div className="relative flex py-2 items-center" role="separator" aria-label="Login alternatives">
                     <div className="flex-grow border-t border-gray-300"></div>
                     <span className="flex-shrink mx-4 text-gray-400 text-sm font-medium">OR</span>
                     <div className="flex-grow border-t border-gray-300"></div>
@@ -450,7 +456,7 @@ export default function LoginPage() {
                         </div>
                     </div>
                 </div>
-            </div>
+            </main>
         </div>
     );
 }

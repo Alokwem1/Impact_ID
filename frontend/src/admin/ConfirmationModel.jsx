@@ -1,4 +1,5 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import { 
     ExclamationTriangleIcon,
     InformationCircleIcon,
@@ -19,8 +20,81 @@ export default function ConfirmationModal({
     variant = 'danger', // 'danger', 'warning', 'info', 'success', 'question'
     size = 'md', // 'sm', 'md', 'lg', 'xl'
     showIcon = true,
-    preventClose = false, // Prevent closing when action is in progress
+    preventClose = false, // Prevent close when action is in progress
 }) {
+    const modalRef = React.useRef(null);
+    const closeButtonRef = React.useRef(null);
+    const previouslyFocusedElement = React.useRef(null);
+
+    // Capture element that had focus before opening
+    React.useEffect(() => {
+        if (isOpen) {
+            previouslyFocusedElement.current = document.activeElement;
+        }
+    }, [isOpen]);
+
+    // Handle escape key - MUST be called before early return
+    React.useEffect(() => {
+        if (!isOpen) return;
+        
+        const handleEscape = (e) => {
+            if (e.key === 'Escape' && !preventClose && !isConfirming) {
+                onClose();
+            }
+        };
+
+        document.addEventListener('keydown', handleEscape);
+        document.body.style.overflow = 'hidden';
+
+        return () => {
+            document.removeEventListener('keydown', handleEscape);
+            document.body.style.overflow = 'unset';
+        };
+    }, [isOpen, onClose, preventClose, isConfirming]);
+
+    // Manage initial focus when modal opens for accessibility
+    React.useEffect(() => {
+        if (!isOpen) return;
+        // Prefer focusing the close button if present, otherwise the modal container
+        const toFocus = closeButtonRef.current || modalRef.current;
+        if (toFocus && typeof toFocus.focus === 'function') {
+            // Slight delay to ensure element is mounted
+            setTimeout(() => toFocus.focus(), 0);
+        }
+    }, [isOpen]);
+
+    // Return focus to the previously focused element when modal closes
+    React.useEffect(() => {
+        if (!isOpen && previouslyFocusedElement.current && typeof previouslyFocusedElement.current.focus === 'function') {
+            previouslyFocusedElement.current.focus();
+        }
+    }, [isOpen]);
+
+    // Basic focus trap within modal
+    React.useEffect(() => {
+        if (!isOpen) return;
+        const handleKeyDown = (e) => {
+            if (e.key !== 'Tab') return;
+            const focusableSelectors = [
+                'a[href]','button:not([disabled])','textarea:not([disabled])','input:not([disabled])','select:not([disabled])','[tabindex]:not([tabindex="-1"])'
+            ];
+            const focusable = modalRef.current ? Array.from(modalRef.current.querySelectorAll(focusableSelectors.join(','))) : [];
+            if (focusable.length === 0) return;
+            const firstEl = focusable[0];
+            const lastEl = focusable[focusable.length - 1];
+            if (!e.shiftKey && document.activeElement === lastEl) {
+                e.preventDefault();
+                firstEl.focus();
+            } else if (e.shiftKey && document.activeElement === firstEl) {
+                e.preventDefault();
+                lastEl.focus();
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen]);
+
+    // Early return after hooks
     if (!isOpen) return null;
 
     // Handle backdrop click
@@ -29,25 +103,6 @@ export default function ConfirmationModal({
             onClose();
         }
     };
-
-    // Handle escape key
-    React.useEffect(() => {
-        const handleEscape = (e) => {
-            if (e.key === 'Escape' && !preventClose && !isConfirming) {
-                onClose();
-            }
-        };
-
-        if (isOpen) {
-            document.addEventListener('keydown', handleEscape);
-            document.body.style.overflow = 'hidden';
-        }
-
-        return () => {
-            document.removeEventListener('keydown', handleEscape);
-            document.body.style.overflow = 'unset';
-        };
-    }, [isOpen, onClose, preventClose, isConfirming]);
 
     // Get variant styles
     const getVariantStyles = () => {
@@ -107,14 +162,25 @@ export default function ConfirmationModal({
     const Icon = variantStyles.icon;
 
     return (
-        <div
+        <div 
             className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 transition-opacity"
-            aria-labelledby="modal-title"
-            role="dialog"
-            aria-modal="true"
             onClick={handleBackdropClick}
+            onKeyDown={(e) => {
+                if (e.key === 'Escape' && !preventClose && !isConfirming) {
+                    onClose();
+                }
+            }}
+            role="dialog"
+            aria-labelledby="modal-title"
+            aria-describedby="modal-description"
+            aria-modal="true"
+            aria-live="assertive"
         >
-            <div className={`bg-white rounded-lg shadow-xl p-0 w-full ${sizeClass} m-4 transform transition-all`}>
+            <div
+                ref={modalRef}
+                className={`bg-white rounded-lg shadow-xl p-0 w-full ${sizeClass} m-4 transform transition-all`}
+                tabIndex={-1}
+            >
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-gray-200">
                     <div className="flex items-center">
@@ -131,6 +197,7 @@ export default function ConfirmationModal({
                         {!preventClose && !isConfirming && (
                             <button
                                 onClick={onClose}
+                                ref={closeButtonRef}
                                 className="ml-4 text-gray-400 hover:text-gray-600 transition-colors"
                                 aria-label="Close modal"
                             >
@@ -141,7 +208,7 @@ export default function ConfirmationModal({
                 </div>
 
                 {/* Content */}
-                <div className="px-6 py-4">
+                <div className="px-6 py-4" id="modal-description">
                     <div className="text-sm text-gray-600 leading-relaxed">
                         {children}
                     </div>
@@ -179,6 +246,22 @@ export default function ConfirmationModal({
         </div>
     );
 }
+
+// PropTypes for ConfirmationModal
+ConfirmationModal.propTypes = {
+    isOpen: PropTypes.bool.isRequired,
+    onClose: PropTypes.func.isRequired,
+    onConfirm: PropTypes.func.isRequired,
+    title: PropTypes.string.isRequired,
+    children: PropTypes.node,
+    confirmText: PropTypes.string,
+    cancelText: PropTypes.string,
+    isConfirming: PropTypes.bool,
+    variant: PropTypes.oneOf(['danger', 'warning', 'info', 'success', 'question']),
+    size: PropTypes.oneOf(['sm', 'md', 'lg', 'xl']),
+    showIcon: PropTypes.bool,
+    preventClose: PropTypes.bool
+};
 
 // Quick action variants for common use cases
 export const DeleteConfirmationModal = (props) => (

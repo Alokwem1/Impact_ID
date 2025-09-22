@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useWebSocketStatusPublisher } from './WebSocketStatusContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './utils/AuthContext';
+import { queryKeys } from './api/queryKeys';
+import { authEvents, AUTH_EVENT } from './utils/authEvents';
 import toast from 'react-hot-toast';
 
 // ================================
@@ -31,8 +34,8 @@ const WS_CONFIG = {
 const createMessageHandlers = (queryClient, user) => ({
     // Task-related updates
     'tasks_update': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['tasks'] });
-        queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
         
         if (data.task_title) {
             toast.success(`New task available: ${data.task_title}`, {
@@ -43,10 +46,10 @@ const createMessageHandlers = (queryClient, user) => ({
     },
 
     'task_completed': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['tasks'] });
-        queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
-        queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
-        queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.root() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
         
         if (data.user_id === user?.id) {
             toast.success(`Task completed! +${data.xp_earned || 0} XP`, {
@@ -58,8 +61,8 @@ const createMessageHandlers = (queryClient, user) => ({
 
     // Submission workflow updates
     'submission_update': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['submissions'] });
-        queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.submissions.root() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.admin.dashboard() });
         
         if (data.user_id === user?.id) {
             const statusMessages = {
@@ -83,8 +86,8 @@ const createMessageHandlers = (queryClient, user) => ({
 
     // Leaderboard and ranking updates
     'leaderboard_update': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
-        queryClient.invalidateQueries({ queryKey: ['weavingLeaderboard'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.root() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.weaving.leaderboard() });
         
         if (data.user_id === user?.id && data.new_rank) {
             toast.success(`You've moved to rank #${data.new_rank}!`, {
@@ -96,9 +99,9 @@ const createMessageHandlers = (queryClient, user) => ({
 
     // Badge and achievement system
     'badges_update': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['badges'] });
-        queryClient.invalidateQueries({ queryKey: ['userProfile'] });
-        queryClient.invalidateQueries({ queryKey: ['recentAchievements'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.badges.root() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.achievements.recent() });
         
         if (data.user_id === user?.id) {
             toast.success(`New badge earned: ${data.badge_title}!`, {
@@ -109,9 +112,9 @@ const createMessageHandlers = (queryClient, user) => ({
     },
 
     'achievement_unlocked': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['badges'] });
-        queryClient.invalidateQueries({ queryKey: ['userProfile'] });
-        queryClient.invalidateQueries({ queryKey: ['recentAchievements'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.badges.root() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.achievements.recent() });
         
         if (data.user_id === user?.id) {
             toast.success(`Achievement unlocked: ${data.achievement_title}!`, {
@@ -123,8 +126,8 @@ const createMessageHandlers = (queryClient, user) => ({
 
     // Essence and rewards
     'essence_update': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['userProfile'] });
-        queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
         
         if (data.user_id === user?.id && data.amount > 0) {
             toast.success(`+${data.amount} Essence earned!`, {
@@ -136,25 +139,26 @@ const createMessageHandlers = (queryClient, user) => ({
 
     // Weaving Loom updates
     'weaving_update': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['weavingStatus'] });
-        queryClient.invalidateQueries({ queryKey: ['availableThreads'] });
-        queryClient.invalidateQueries({ queryKey: ['weavingLeaderboard'] });
-        
-        if (data.user_id === user?.id) {
-            if (data.type === 'thread_completed') {
-                toast.success(`Thread woven successfully! +${data.impact_score || 0} impact`, {
-                    icon: '🧵',
-                    duration: 5000
-                });
-            }
+    // Invalidate weaving related caches regardless of who initiated (others may view leaderboard/threads)
+    queryClient.invalidateQueries({ queryKey: queryKeys.weaving.status() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.weaving.availableThreads() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.weaving.leaderboard() });
+
+        // Support multiple possible subtype field names for backwards compatibility
+        const subtype = data.update_type || data.weaving_type || data.sub_type || data.subType || data.type_detail || data.event_type || data.weavingEvent || data.weaving_event_type || data.subtype || data.thread_event || data.thread_type || data.threadEvent || data.inner_type || data.kind || (data.type !== 'weaving_update' ? data.type : undefined);
+        if (data.user_id === user?.id && subtype === 'thread_completed') {
+            toast.success(`Thread woven successfully! +${data.impact_score || 0} impact`, {
+                icon: '🧵',
+                duration: 5000
+            });
         }
     },
 
     // Admin notifications
     'admin_notification': (data) => {
         if (user?.role === 'admin') {
-            queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
-            queryClient.invalidateQueries({ queryKey: ['adminUsers'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.dashboard() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.usersRoot() });
             
             toast(data.message, {
                 icon: '🔔',
@@ -191,14 +195,34 @@ const createMessageHandlers = (queryClient, user) => ({
 
     // User activity updates
     'user_activity': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['recentActivities'] });
-        queryClient.invalidateQueries({ queryKey: ['userHistory'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.activities.recent() });
+    // user history could be parameterized; broad dashboard invalidation
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.history(user?.id || 'current') });
+    },
+
+    // Activity feed real-time additions (backend may emit as new_activity)
+    'new_activity': (data) => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.activities.recent() });
+    if (data?.username && data?.action) {
+        toast.success(`${data.username} ${data.action.replace(/_/g,' ')}!`, {
+            icon: '📰',
+            duration: 3000
+        });
+    }
+    },
+
+    // Reaction updates on activities
+    'reaction_update': (data) => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.activities.recent() });
+    if (data?.activity_id) {
+        // Could target a specific activity detail key if one existed
+    }
     },
 
     // Level up notifications
     'level_up': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['userProfile'] });
-        queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
         
         if (data.user_id === user?.id) {
             toast.success(`Level up! You're now level ${data.new_level}!`, {
@@ -210,16 +234,18 @@ const createMessageHandlers = (queryClient, user) => ({
 
     // Streak notifications
     'streak_update': (data) => {
-        queryClient.invalidateQueries({ queryKey: ['userProfile'] });
-        queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
-        
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
+
+        // Similar subtype extraction approach as weaving_update
+        const subtype = data.streak_type || data.update_type || data.sub_type || data.subType || data.type_detail || data.event_type || data.subtype || (data.type !== 'streak_update' ? data.type : undefined);
         if (data.user_id === user?.id) {
-            if (data.type === 'streak_milestone') {
+            if (subtype === 'streak_milestone') {
                 toast.success(`${data.streak_count} day streak! Keep it up!`, {
                     icon: '🔥',
                     duration: 6000
                 });
-            } else if (data.type === 'streak_lost') {
+            } else if (subtype === 'streak_lost') {
                 toast.error('Streak lost! Start a new one today.', {
                     icon: '💔',
                     duration: 4000
@@ -233,9 +259,31 @@ const createMessageHandlers = (queryClient, user) => ({
 // 🔌 ENHANCED WEBSOCKET MANAGER
 // ================================
 
+// Allow tests to inject a custom WebSocket implementation
+let WebSocketFactory = (url) => new WebSocket(url);
+export function setWebSocketFactory(factory) {
+    WebSocketFactory = factory;
+}
+
+// Keep a reference to the most recent socket instance (test visibility only; not for app logic)
+export let __lastSocket = null; // test-only reference
+
+// Extracted helper for sending auth refresh – exported for deterministic testing
+export function sendAuthRefresh(socketInstance, token) {
+    if (!socketInstance || socketInstance.readyState !== WebSocket.OPEN || !token) return false;
+    try {
+        socketInstance.send(JSON.stringify({ type: 'auth_refresh', token }));
+        return true;
+    } catch (e) {
+        // Swallow errors (socket might be closing) – return false to indicate failure
+        return false;
+    }
+}
+
 export default function WebSocketManager() {
     const queryClient = useQueryClient();
     const { user, isAuthenticated } = useAuth();
+    const publishStatus = useWebSocketStatusPublisher?.();
     
     // WebSocket state management
     const socketRef = useRef(null);
@@ -275,7 +323,8 @@ export default function WebSocketManager() {
             socketRef.current = null;
         }
         
-        setConnectionState('disconnected');
+    setConnectionState('disconnected');
+    publishStatus && publishStatus('disconnected');
     }, []);
 
     const startHeartbeat = useCallback(() => {
@@ -295,13 +344,15 @@ export default function WebSocketManager() {
         // Close existing connection
         cleanup();
         
-        setConnectionState('connecting');
+    setConnectionState('connecting');
+    publishStatus && publishStatus('connecting');
         
         try {
             const wsURL = WS_CONFIG.getWebSocketURL(user.id);
             console.log('Connecting to WebSocket:', wsURL);
             
-            socketRef.current = new WebSocket(wsURL);
+            socketRef.current = WebSocketFactory(wsURL);
+            __lastSocket = socketRef.current; // update test handle
             
             // Connection timeout
             const connectionTimeout = setTimeout(() => {
@@ -315,16 +366,20 @@ export default function WebSocketManager() {
                 clearTimeout(connectionTimeout);
                 console.log('WebSocket connected successfully');
                 setConnectionState('connected');
+                publishStatus && publishStatus('connected');
                 setReconnectAttempts(0);
                 
                 // Start heartbeat
                 startHeartbeat();
                 
-                // Send authentication message
-                socketRef.current.send(JSON.stringify({
-                    type: 'auth',
-                    token: localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken')
-                }));
+                // Send authentication message (idempotent)
+                const currentToken = localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken');
+                if (currentToken) {
+                    socketRef.current.send(JSON.stringify({
+                        type: 'auth',
+                        token: currentToken
+                    }));
+                }
                 
                 toast.success('Real-time connection established!', { 
                     icon: '🔗',
@@ -360,6 +415,7 @@ export default function WebSocketManager() {
             socketRef.current.onclose = (event) => {
                 clearTimeout(connectionTimeout);
                 setConnectionState('disconnected');
+                publishStatus && publishStatus('disconnected');
                 
                 // Clear heartbeat
                 if (heartbeatIntervalRef.current) {
@@ -377,6 +433,7 @@ export default function WebSocketManager() {
                     
                     setReconnectAttempts(prev => prev + 1);
                     setConnectionState('reconnecting');
+                    publishStatus && publishStatus('reconnecting');
                     
                     reconnectTimeoutRef.current = setTimeout(() => {
                         connect();
@@ -393,6 +450,7 @@ export default function WebSocketManager() {
                 clearTimeout(connectionTimeout);
                 console.error('WebSocket error:', error);
                 setConnectionState('error');
+                publishStatus && publishStatus('error');
                 
                 // Close the connection to trigger reconnection
                 if (socketRef.current) {
@@ -403,6 +461,7 @@ export default function WebSocketManager() {
         } catch (error) {
             console.error('Failed to create WebSocket connection:', error);
             setConnectionState('error');
+            publishStatus && publishStatus('error');
         }
     }, [user, isAuthenticated, cleanup, startHeartbeat, messageHandlers, reconnectAttempts]);
 
@@ -419,6 +478,41 @@ export default function WebSocketManager() {
 
         return cleanup;
     }, [user?.id, isAuthenticated, connect, cleanup]);
+
+    // Auth event integration
+    useEffect(() => {
+        // Re-authenticate with fresh token without full reconnect
+        const onTokenRefresh = ({ token }) => {
+            // Delegate to testable helper
+            sendAuthRefresh(socketRef.current, token);
+        };
+
+        // Close socket on session expiry
+        const onSessionExpired = () => {
+            if (socketRef.current) {
+                try {
+                    socketRef.current.close(4001, 'session_expired');
+                } catch (err) {
+                    // Silently ignore errors during close; socket may already be closing/closed
+                }
+            }
+        };
+
+        // Graceful logout handling
+        const onLogout = () => {
+            cleanup();
+        };
+
+        const unsubRefresh = authEvents.on(AUTH_EVENT.TOKEN_REFRESH, onTokenRefresh);
+        const unsubExpired = authEvents.on(AUTH_EVENT.SESSION_EXPIRED, onSessionExpired);
+        const unsubLogout = authEvents.on(AUTH_EVENT.LOGOUT, onLogout);
+
+        return () => {
+            unsubRefresh();
+            unsubExpired();
+            unsubLogout();
+        };
+    }, [cleanup]);
 
     // Cleanup on unmount
     useEffect(() => {

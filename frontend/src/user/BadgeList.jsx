@@ -36,6 +36,7 @@ import {
     BookmarkIcon as BookmarkIconSolid
 } from '@heroicons/react/24/solid';
 import apiClient from '../api/axios';
+import { queryKeys } from '../api/queryKeys';
 import toast from 'react-hot-toast';
 import BadgeItem from '../user/BadgeItem';
 
@@ -274,7 +275,7 @@ export default function BadgeList() {
         error: statsError,
         refetch: refetchStats 
     } = useQuery({
-        queryKey: ['badge_stats'],
+        queryKey: queryKeys.badges.stats(),
         queryFn: fetchBadgeStats,
         staleTime: 5 * 60 * 1000, // 5 minutes
         retry: 2,
@@ -292,7 +293,7 @@ export default function BadgeList() {
         refetch,
         isFetching 
     } = useQuery({
-        queryKey: ['badges', activeTab, queryParams],
+        queryKey: queryKeys.badges.filtered(activeTab, queryParams),
         queryFn: () => {
             switch (activeTab) {
                 case 'earned':
@@ -344,11 +345,11 @@ export default function BadgeList() {
                 }
                 
                 // Comprehensive cache invalidation
-                queryClient.invalidateQueries({ queryKey: ['badges'] });
-                queryClient.invalidateQueries({ queryKey: ['badge_stats'] });
-                queryClient.invalidateQueries({ queryKey: ['user_profile'] });
-                queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
-                queryClient.invalidateQueries({ queryKey: ['recentAchievements'] });
+                queryClient.invalidateQueries({ queryKey: queryKeys.badges.root() });
+                queryClient.invalidateQueries({ queryKey: queryKeys.badges.all() });
+                queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+                queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
+                queryClient.invalidateQueries({ queryKey: queryKeys.achievements.recent() });
             } else {
                 toast.success('Badge check complete - keep up the great work!', {
                     icon: '✨',

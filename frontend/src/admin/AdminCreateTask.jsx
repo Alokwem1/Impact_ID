@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryKeys';
 import { 
     PlusIcon, 
     ClockIcon, 
@@ -83,9 +84,8 @@ export default function AdminCreateTask() {
             });
             setFormData(initialFormState);
             setQuizBuilder({ question: '', options: ['', '', '', ''], correct_index: 0 });
-            queryClient.invalidateQueries({ queryKey: ['tasks'] });
-            queryClient.invalidateQueries({ queryKey: ['admin', 'tasks'] });
-            queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.admin.dashboard() });
         },
         onError: (err) => {
             console.error('Task creation error:', err);

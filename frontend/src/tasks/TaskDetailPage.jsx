@@ -30,6 +30,7 @@ import {
     FireIcon as FireIconSolid
 } from '@heroicons/react/24/solid';
 import apiClient from '../api/axios';
+import { queryKeys } from '../api/queryKeys';
 import Layout from '../tasks/Layout';
 import toast from 'react-hot-toast';
 
@@ -139,7 +140,7 @@ export default function TaskDetailPage() {
 
     // ✅ ENHANCED: Better error handling and retry logic
     const { data: task, isLoading, isError, error } = useQuery({
-        queryKey: ['task', id],
+        queryKey: queryKeys.tasks.detail(id),
         queryFn: () => fetchTaskById(id),
         staleTime: 5 * 60 * 1000, // 5 minutes
         retry: (failureCount, error) => {
@@ -192,11 +193,14 @@ export default function TaskDetailPage() {
             }
             
             // Invalidate queries to refetch data
-            queryClient.invalidateQueries({ queryKey: ['tasks'] });
-            queryClient.invalidateQueries({ queryKey: ['task', id] });
-            queryClient.invalidateQueries({ queryKey: ['user_profile'] });
-            queryClient.invalidateQueries({ queryKey: ['user_badges'] });
-            queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(id) });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+            // Assuming task has a user/owner identifier for badges invalidation
+            if (task?.user_id || task?.owner_id) {
+                queryClient.invalidateQueries({ queryKey: queryKeys.user.badges(task.user_id || task.owner_id) });
+            }
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
             
             // Navigate back to tasks list
             navigate('/tasks');
@@ -325,12 +329,13 @@ export default function TaskDetailPage() {
         if (!task || isCompleted()) return null;
 
         switch (task.type) {
-            case 'quiz':
+            case 'quiz': {
                 if (!task.quiz_question) return null;
-                
+
                 // Handle both array and object options from your backend
-                const options = Array.isArray(task.quiz_question.options) 
-                    ? task.quiz_question.options 
+                let options = [];
+                options = Array.isArray(task.quiz_question.options)
+                    ? task.quiz_question.options
                     : task.quiz_question.options?.choices || [];
                     
                 return (
@@ -361,6 +366,7 @@ export default function TaskDetailPage() {
                         </div>
                     </div>
                 );
+            }
 
             case 'upload':
                 return (

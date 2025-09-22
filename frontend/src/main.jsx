@@ -1,7 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import PropTypes from 'prop-types';
 import App from './App.jsx';
 import './index.css';
+import { initWebVitals } from './reportWebVitals.js';
 
 // ================================
 // 🔧 ENHANCED ERROR BOUNDARY FOR ROOT LEVEL
@@ -119,13 +121,17 @@ class RootErrorBoundary extends React.Component {
     }
 }
 
+// PropTypes for RootErrorBoundary
+RootErrorBoundary.propTypes = {
+    children: PropTypes.node.isRequired
+};
+
 // ================================
 // 🚀 ENHANCED APPLICATION BOOTSTRAPPING
 // ================================
 
-// Enhanced initialization function
-const initializeApp = async () => {
-    // Set up global error handlers
+// Set up global error handlers
+const setupErrorHandlers = () => {
     window.addEventListener('error', (event) => {
         console.error('🔥 Global error:', event.error);
         
@@ -138,16 +144,41 @@ const initializeApp = async () => {
     // Handle unhandled promise rejections
     window.addEventListener('unhandledrejection', (event) => {
         console.error('🔥 Unhandled promise rejection:', event.reason);
-        
-        // Prevent the default browser behavior
         event.preventDefault();
     });
+};
 
-    // ================================
-    // 🔍 PERFORMANCE MONITORING
-    // ================================
+// Set up performance monitoring
+const setupPerformanceMonitoring = () => {
+    if (!import.meta.env.DEV || !window.PerformanceObserver) return;
     
-    // Performance observer for Core Web Vitals (development only)
+    try {
+        const observer = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+                if (entry.entryType === 'largest-contentful-paint') {
+                    console.log('📊 LCP:', entry.startTime);
+                }
+            }
+        });
+        observer.observe({ entryTypes: ['largest-contentful-paint'] });
+    } catch (e) {
+        console.warn('Performance monitoring setup failed:', e);
+    }
+};
+
+// Set up analytics and tracking
+const setupAnalytics = () => {
+    // Initialize analytics here if needed
+    if (import.meta.env.PROD && window.gtag) {
+        window.gtag('config', 'GA_MEASUREMENT_ID');
+    }
+};
+
+// Enhanced initialization function
+const initializeApp = async () => {
+    setupErrorHandlers();
+    setupPerformanceMonitoring();
+    setupAnalytics();
     if (import.meta.env.DEV && 'PerformanceObserver' in window) {
         try {
             // Measure Largest Contentful Paint (LCP)
@@ -194,12 +225,10 @@ const initializeApp = async () => {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 3000);
             
+            const base = import.meta.env.VITE_API_BASE_URL || window.location.origin;
             const response = await fetch(
-                `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/health`,
-                { 
-                    signal: controller.signal,
-                    mode: 'cors'
-                }
+                `${base.replace(/\/$/, '')}/health`,
+                { signal: controller.signal, mode: 'cors' }
             );
             
             clearTimeout(timeoutId);
@@ -330,6 +359,9 @@ const renderApp = () => {
     // ================================
     // 🔍 DEVELOPMENT TOOLS
     // ================================
+
+    // Initialize web vitals collection (console only by default)
+    initWebVitals();
     
     if (import.meta.env.DEV) {
         // Add development helpers to window
@@ -341,8 +373,9 @@ const renderApp = () => {
             // Helper functions for debugging
             testBackend: async () => {
                 try {
-                    const response = await fetch(`${window.__IMPACT_ID_DEV__.apiUrl}/health`);
-                    console.log('Backend Status:', response.ok ? '✅ Online' : '❌ Offline');
+                    const base = window.__IMPACT_ID_DEV__.apiUrl.replace(/\/$/, '');
+                    const response = await fetch(`${base}/health`);
+                    console.log('Backend Status:', response.ok ? '✅ Online' : '❌ Offline', response.status);
                     return response.ok;
                 } catch (error) {
                     console.log('Backend Status: ❌ Error -', error.message);

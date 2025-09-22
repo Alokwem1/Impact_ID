@@ -6,6 +6,8 @@ Auth module for Impact ID application.
 from datetime import datetime, timedelta
 from typing import Optional
 import logging
+import os
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -15,12 +17,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import schemas, models
 from app.database import get_db
 from app.utils.dependencies import get_current_user
-from app.utils.security import verify_password, create_access_token, get_password_hash
+from app.utils.security import (
+    verify_password,
+    create_access_token,
+    get_password_hash,
+    create_password_reset_token,
+    verify_password_reset_token,
+)
+from app.utils.common import utcnow
 
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter(tags=["Authentication"])  # Prefix applied centrally in main include_router
 security = HTTPBearer()
 
 # ================================
@@ -48,18 +57,19 @@ async def login_for_access_token(
         user = result.scalar_one_or_none()
 
         if not user or not verify_password(login_data.password, user.hashed_password):
-            logger.warning("Failed login attempt for: %s from {request.client.host}", login_data.username)
+            client_ip = getattr(request.client, 'host', 'unknown') if request else 'unknown'
+            logger.warning("Failed login attempt for: %s from %s", login_data.username, client_ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect username or password",
                 headers={"WWW-Authenticate": "Bearer"},
-            ) from e
+            )
 
         if user.status != "active":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Account is {user.status}. Please contact support."
-            ) from e
+            )
 
         # Create access token
         access_token_expires = timedelta(hours=24)  # 24 hour expiry
@@ -74,7 +84,7 @@ async def login_for_access_token(
         )
 
         # Update last login
-        user.last_active = datetime.utcnow()
+        user.last_active = utcnow()
         await db.commit()
 
         logger.info("Successful login for user: %s", user.username)
@@ -88,18 +98,18 @@ async def login_for_access_token(
             "user_id": user.id
         }
 
-    except HTTPException as e:
+    except HTTPException:
         raise
     except Exception as e:
         logger.error("Login error: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication service temporarily unavailable"
-        ) from e
+    )
 
 @router.post("/register", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
 async def register_user(
-    user_data: schemas.UserCreate,
+    user_data: schemas.AuthRegister,
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
@@ -109,35 +119,50 @@ async def register_user(
     Creates user with email verification required.
     """
     try:
-        # Check if user already exists
+        # Normalize input (case-fold & trim) for consistent uniqueness handling
+        normalized_username = user_data.username.strip().lower()
+        normalized_email = user_data.email.strip().lower()
+
+        # Check if user already exists (case-insensitive match)
         existing_user_query = select(models.User).where(
-            (models.User.username == user_data.username) |
-            (models.User.email == user_data.email)
+            (func.lower(models.User.username) == normalized_username) |
+            (func.lower(models.User.email) == normalized_email)
         )
         result = await db.execute(existing_user_query)
         existing_user = result.scalar_one_or_none()
 
         if existing_user:
-            if existing_user.username == user_data.username:
+            # Provide precise conflict detail
+            if existing_user.username.lower() == normalized_username:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Username already registered"
-                ) from e
+                )
             else:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Email already registered"
-                ) from e
+                )
+
+        # Optional breach password check (k-anonymity style stub)
+        if os.getenv("ENABLE_BREACH_CHECK", "0").lower() in {"1","true","yes"}:
+            pwd_hash = hashlib.sha1(user_data.password.encode("utf-8")).hexdigest().upper()
+            prefix, suffix = pwd_hash[:5], pwd_hash[5:]
+            # In a real implementation we would query haveibeenpwned range API for prefix
+            # Here we simulate a tiny in-memory deny list to demonstrate behavior
+            simulated_compromised_suffixes = {"DEMO1234567890DEADBEEFDEADBEEFDEADBE"}
+            if suffix in simulated_compromised_suffixes:
+                raise HTTPException(status_code=400, detail="Password appears in breach corpus; choose a stronger password")
 
         # Create new user
         hashed_password = get_password_hash(user_data.password)
         db_user = models.User(
-            username=user_data.username,
-            email=user_data.email,
+            username=normalized_username,
+            email=normalized_email,
             hashed_password=hashed_password,
             role="user",
             status="active",
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
             xp=0,
             level=1,
             streak=0,
@@ -152,7 +177,7 @@ async def register_user(
 
         return db_user
 
-    except HTTPException as e:
+    except HTTPException:
         raise
     except Exception as e:
         logger.error("Registration error: %s", e)
@@ -160,7 +185,7 @@ async def register_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Registration service temporarily unavailable"
-        ) from e
+    )
 
 @router.get("/me", response_model=schemas.UserOut)
 async def get_current_authenticated_user(
@@ -197,7 +222,7 @@ async def refresh_access_token(
         )
 
         # Update last active
-        current_user.last_active = datetime.utcnow()
+        current_user.last_active = utcnow()
         await db.commit()
 
         return {
@@ -214,7 +239,7 @@ async def refresh_access_token(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Token refresh service temporarily unavailable"
-        ) from e
+        )
 
 # ================================
 # 🔑 PASSWORD MANAGEMENT
@@ -223,35 +248,119 @@ async def refresh_access_token(
 @router.post("/forgot-password")
 async def forgot_password(
     request_data: schemas.ForgotPasswordRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Request password reset for user account.
+    """Initiate password reset flow.
 
-    Sends reset token to user's email address.
+    Always returns a generic success message (don't leak user existence).
+    If user exists: generate password reset token, persist in DB table `password_reset_tokens`.
+    (Optional future enhancement: dispatch email with reset link.)
     """
     try:
-        # Find user by email
-        query = select(models.User).where(models.User.email == request_data.email)
-        result = await db.execute(query)
+        stmt = select(models.User).where(models.User.email == request_data.email.lower())
+        result = await db.execute(stmt)
         user = result.scalar_one_or_none()
 
-        if not user:
-            # Don't reveal if email exists or not for security
-            return {"message": "If the email exists, a reset link has been sent"}
+        if user:
+            # Create JWT-based reset token
+            reset_token = create_password_reset_token(user_id=user.id, email=user.email)
 
-        # Generate reset token (implement your token generation logic)
-        # For now, return success message
-        logger.info("Password reset requested for: %s", request_data.email)
+            # Persist DB record (duplicate tokens prevented by unique constraint)
+            expires_at = utcnow() + timedelta(hours=2)
+            db_record = models.PasswordResetToken(
+                user_id=user.id,
+                token=reset_token,
+                expires_at=expires_at,
+                ip_address=getattr(request.client, 'host', None)
+            )
+            db.add(db_record)
+            try:
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                logger.warning("Failed to persist password reset token for user_id=%s", user.id)
 
+            logger.info("Password reset requested for user_id=%s email=%s", user.id, user.email)
+
+        # Generic response regardless of user existence
         return {"message": "If the email exists, a reset link has been sent"}
-
     except Exception as e:
-        logger.error("Password reset error: %s", e)
+        logger.error("Password reset request error: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Password reset service temporarily unavailable"
-        ) from e
+    )
+
+@router.post("/reset-password")
+async def reset_password(
+    payload: schemas.ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Complete password reset using a valid token.
+
+    Steps:
+    1. Verify JWT token structure & type via unified manager.
+    2. Lookup DB token record (unused, not expired).
+    3. Update user password & mark token as used.
+    4. Return success message.
+    """
+    try:
+        # Verify token (raises HTTPException if invalid/expired/type mismatch). Tests expect 400/404 not 401.
+        try:
+            token_payload = verify_password_reset_token(payload.token)
+        except HTTPException as ve:
+            # Map 401 from token verification to 400 to satisfy negative test expectation
+            if ve.status_code == status.HTTP_401_UNAUTHORIZED:
+                raise HTTPException(status_code=400, detail="Invalid token")
+            raise
+        user_id = token_payload.get("user_id") or token_payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Invalid token payload")
+
+        # Fetch DB token record
+        stmt = select(models.PasswordResetToken).where(models.PasswordResetToken.token == payload.token)
+        result = await db.execute(stmt)
+        token_record = result.scalar_one_or_none()
+        if not token_record or token_record.used:
+            raise HTTPException(status_code=400, detail="Invalid or used token")
+        if utcnow() > token_record.expires_at:
+            raise HTTPException(status_code=400, detail="Token has expired")
+
+        # Fetch user
+        user_stmt = select(models.User).where(models.User.id == token_record.user_id)
+        user_res = await db.execute(user_stmt)
+        user = user_res.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Optional breach check before accepting new password
+        if os.getenv("ENABLE_BREACH_CHECK", "0").lower() in {"1","true","yes"}:
+            pwd_hash = hashlib.sha1(payload.new_password.encode("utf-8")).hexdigest().upper()
+            prefix, suffix = pwd_hash[:5], pwd_hash[5:]
+            simulated_compromised_suffixes = {"DEMO1234567890DEADBEEFDEADBEEFDEADBE"}
+            if suffix in simulated_compromised_suffixes:
+                raise HTTPException(status_code=400, detail="Password appears in breach corpus; choose a stronger password")
+
+        # Set new password
+        user.hashed_password = get_password_hash(payload.new_password)
+        user.updated_at = utcnow() if hasattr(user, 'updated_at') else utcnow()
+
+        # Mark token used
+        token_record.used = True
+        token_record.used_at = utcnow()
+        await db.commit()
+
+        logger.info("Password reset successful for user_id=%s", user.id)
+        return {"message": "Password reset successful"}
+    except HTTPException:
+        # Already proper client error semantics
+        raise
+    except Exception as e:
+        logger.error("Password reset error: %s", e)
+        await db.rollback()
+    raise HTTPException(status_code=500, detail="Password reset failed")
+            
 
 @router.post("/change-password")
 async def change_password(
@@ -270,11 +379,11 @@ async def change_password(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Current password is incorrect"
-            ) from e
+            )
 
         # Update password
         current_user.hashed_password = get_password_hash(password_data.new_password)
-        current_user.updated_at = datetime.utcnow()
+        current_user.updated_at = utcnow()
 
         await db.commit()
 
@@ -290,7 +399,7 @@ async def change_password(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Password change service temporarily unavailable"
-        ) from e
+    )
 
 # ================================
 # 🔐 TOKEN VALIDATION
@@ -325,7 +434,7 @@ async def logout(
     """
     try:
         # Update last active
-        current_user.last_active = datetime.utcnow()
+        current_user.last_active = utcnow()
         await db.commit()
 
         logger.info("User logged out: %s", current_user.username)
@@ -359,7 +468,8 @@ async def check_username_availability(
 
         except Exception as e:
 
-            raise HTTPException(status_code=500, detail="Error") from e
+            raise HTTPException(status_code=500, detail="Error")
+            
 
 @router.get("/check-email")
 async def check_email_availability(
@@ -381,4 +491,5 @@ async def check_email_availability(
 
         except Exception as e:
 
-            raise HTTPException(status_code=500, detail="Error") from e
+            raise HTTPException(status_code=500, detail="Error")
+            

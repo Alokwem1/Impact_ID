@@ -20,6 +20,7 @@ import {
     StarIcon as StarIconSolid
 } from '@heroicons/react/24/solid';
 import apiClient from '../api/axios';
+import { queryKeys } from '../api/queryKeys';
 import TaskItem from '../tasks/TaskItem';
 import toast from 'react-hot-toast';
 
@@ -63,13 +64,13 @@ const fetchTasks = async (filters) => {
     if (filters.limit) params.append('limit', filters.limit);
     if (filters.offset) params.append('offset', filters.offset);
     
-    const { data } = await apiClient.get(`/tasks/?${params.toString()}`);
+    const { data } = await apiClient.get(`/api/tasks/?${params.toString()}`);
     return data;
 };
 
 // Fetch task categories
 const fetchTaskCategories = async () => {
-    const { data } = await apiClient.get('/tasks/categories');
+    const { data } = await apiClient.get('/api/tasks/categories');
     return data;
 };
 
@@ -94,7 +95,7 @@ export default function TaskList() {
         refetch,
         isFetching 
     } = useQuery({
-        queryKey: ['tasks', filters],
+        queryKey: queryKeys.tasks.list(filters),
         queryFn: () => fetchTasks(filters),
         staleTime: 5 * 60 * 1000, // 5 minutes
         cacheTime: 10 * 60 * 1000, // 10 minutes
@@ -102,7 +103,7 @@ export default function TaskList() {
 
     // Fetch available categories
     const { data: categories } = useQuery({
-        queryKey: ['task-categories'],
+        queryKey: queryKeys.tasks.categories(),
         queryFn: fetchTaskCategories,
         staleTime: 30 * 60 * 1000, // 30 minutes
         cacheTime: 60 * 60 * 1000, // 1 hour

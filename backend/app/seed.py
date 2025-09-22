@@ -16,6 +16,7 @@ import asyncio
 
 from app import models, database, auth
 from app.utils.email import send_email, EmailTemplate
+from app.utils.common import utcnow
 
 
 logging.basicConfig(
@@ -47,7 +48,7 @@ class DatabaseSeeder:
         🚀 Comprehensive database seeding with all essential data.
         """
         logger.info("🌱 Starting comprehensive database seeding...")
-        start_time = datetime.utcnow()
+        start_time = utcnow()
 
         try:
             async with database.get_async_session() as db:
@@ -66,7 +67,7 @@ class DatabaseSeeder:
 
                 await db.commit()
 
-                execution_time = (datetime.utcnow() - start_time).total_seconds()
+                execution_time = (utcnow() - start_time).total_seconds()
                 logger.info("✅ Database seeding completed in %.2f seconds", execution_time)
                 logger.info("📊 Seeded items: %s", self.seeded_items)
 
@@ -115,7 +116,7 @@ class DatabaseSeeder:
             role="admin",
             status="active",
             email_verified=True,
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
             xp=10000,
             level=50,
             essence_balance=1000,
@@ -137,7 +138,7 @@ class DatabaseSeeder:
             role="moderator",
             status="active",
             email_verified=True,
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
             xp=5000,
             level=25,
             essence_balance=500,
@@ -326,7 +327,7 @@ class DatabaseSeeder:
                 auto_award_criteria=getattr(badge_data, "auto_award_criteria", None),
                 is_secret=badge_data.get('is_secret', False),
                 is_active=True,
-                created_at=datetime.utcnow()
+                created_at=utcnow()
             )
             db.add(badge)
             self.seeded_items['badges'] += 1
@@ -477,7 +478,7 @@ class DatabaseSeeder:
                 requires_review=task_data['requires_review'],
                 active=True,
                 created_by_user_id=admin_user.id,
-                created_at=datetime.utcnow()
+                created_at=utcnow()
             )
             db.add(task)
             self.seeded_items['tasks'] += 1
@@ -535,8 +536,8 @@ class DatabaseSeeder:
                 level=user_data['level'],
                 essence_balance=user_data['essence_balance'],
                 streak=user_data['streak'],
-                created_at=datetime.utcnow() - timedelta(days=30),
-                last_active=datetime.utcnow() - timedelta(hours=2),
+                created_at=utcnow() - timedelta(days=30),
+                last_active=utcnow() - timedelta(hours=2),
                 privacy_settings={
                     "show_email": False,
                     "show_progress": True,
@@ -556,7 +557,7 @@ class DatabaseSeeder:
             {
                 'data_type': 'news',
                 'content': 'https://example.com/renewable-energy-breakthrough',
-                'meta_data': {
+                'metadata': {
                     'title': 'Revolutionary Solar Panel Technology Achieves 47% Efficiency',
                     'summary': 'Scientists develop new perovskite-silicon solar cells that could transform renewable energy adoption.',
                     'source': 'Science Daily',
@@ -568,7 +569,7 @@ class DatabaseSeeder:
             {
                 'data_type': 'article',
                 'content': 'https://example.com/education-initiative',
-                'meta_data': {
+                'metadata': {
                     'title': 'Community-Led Education Program Reaches 10,000 Students',
                     'summary': 'Local volunteers create after-school programs that improve literacy rates by 40%.',
                     'source': 'Education Weekly',
@@ -580,7 +581,7 @@ class DatabaseSeeder:
             {
                 'data_type': 'research',
                 'content': 'https://example.com/mental-health-study',
-                'meta_data': {
+                'metadata': {
                     'title': 'Community Gardens Shown to Reduce Depression by 30%',
                     'summary': 'Research demonstrates significant mental health benefits from community gardening programs.',
                     'source': 'Journal of Environmental Psychology',
@@ -595,9 +596,9 @@ class DatabaseSeeder:
             thread = models.ImpactThread(
                 data_type=thread_data['data_type'],
                 content=thread_data['content'],
-                meta_data=thread_data['meta_data'],
+                metadata=thread_data['metadata'],
                 status='raw',
-                created_at=datetime.utcnow() - timedelta(hours=12),
+                created_at=utcnow() - timedelta(hours=12),
                 is_active=True
             )
             db.add(thread)
@@ -622,22 +623,22 @@ class DatabaseSeeder:
             {
                 'action': 'earned_badge',
                 'detail': 'Pioneer',
-                'meta_data': {'badge_type': 'milestone', 'points_earned': 50}
+                'metadata': {'badge_type': 'milestone', 'points_earned': 50}
             },
             {
                 'action': 'completed_task',
                 'detail': 'Welcome to Impact ID!',
-                'meta_data': {'xp_earned': 50, 'task_type': 'quiz'}
+                'metadata': {'xp_earned': 50, 'task_type': 'quiz'}
             },
             {
                 'action': 'level_up',
                 'detail': 'Level 15',
-                'meta_data': {'previous_level': 14, 'new_level': 15}
+                'metadata': {'previous_level': 14, 'new_level': 15}
             },
             {
                 'action': 'thread_woven',
                 'detail': 'Environmental Action',
-                'meta_data': {'essence_earned': 25, 'category': 'sustainability'}
+                'metadata': {'essence_earned': 25, 'category': 'sustainability'}
             }
         ]
 
@@ -649,8 +650,8 @@ class DatabaseSeeder:
                     username=user.username,
                     action=activity_data['action'],
                     detail=activity_data['detail'],
-                    meta_data=activity_data['metadata'],
-                    created_at=datetime.utcnow() - timedelta(hours=i * 2),
+                    metadata=activity_data['metadata'],
+                    created_at=utcnow() - timedelta(hours=i * 2),
                     is_public=True
                 )
                 db.add(activity)
@@ -682,7 +683,7 @@ class DatabaseSeeder:
                 user_badge = models.UserBadge(
                     user_id=user.id,
                     badge_id=badge.id,
-                    awarded_at=datetime.utcnow() - timedelta(days=5)
+                    awarded_at=utcnow() - timedelta(days=5)
                 )
                 db.add(user_badge)
 

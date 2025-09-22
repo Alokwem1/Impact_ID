@@ -2,20 +2,15 @@
 .env
 .env.local
 .env.production
+.env.*.backup
 
 # Dependencies
 node_modules/
-__pycache__/
-*.pyc
-
-# Database
-*.db
-*.db-shm
-*.db-wal
 
 # Build outputs
-frontend/dist/
-backend/app/frontend/
+/dist/
+coverage/
+.vitest/
 
 # Logs
 *.log
@@ -28,3 +23,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Misc
+*.db*

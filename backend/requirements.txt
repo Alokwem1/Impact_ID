@@ -8,6 +8,7 @@ psycopg2-binary==2.9.9          # PostgreSQL adapter
 asyncpg==0.28.0                 # Async PostgreSQL adapter required by SQLAlchemy async engines
 python-dotenv==1.0.1            # .env config
 alembic==1.11.2                 # Database migrations
+prometheus-client==0.20.0       # Metrics exposition for Prometheus
 
 # === 🔐 Authentication & Security ===
 passlib[bcrypt]==1.7.4          # Secure password hashing

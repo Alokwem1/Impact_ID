@@ -1,4 +1,5 @@
-import { createContext, useState, useEffect, useContext } from 'react';
+import { createContext, useState, useEffect, useContext, useMemo } from 'react';
+import PropTypes from 'prop-types';
 
 const THEME_KEY = "impactid-theme";
 const ThemeContext = createContext();
@@ -111,7 +112,7 @@ export const ThemeProvider = ({ children }) => {
         localStorage.removeItem(THEME_KEY); // Remove saved preference
     };
 
-    const value = {
+    const value = useMemo(() => ({
         theme,
         isSystemTheme,
         toggleTheme,
@@ -126,13 +127,18 @@ export const ThemeProvider = ({ children }) => {
             text: theme === 'dark' ? '#f1f5f9' : '#0f172a',
             muted: theme === 'dark' ? '#64748b' : '#6b7280'
         }
-    };
+    }), [theme, isSystemTheme, toggleTheme, setLightTheme, setDarkTheme, useSystemTheme]);
 
     return (
         <ThemeContext.Provider value={value}>
             {children}
         </ThemeContext.Provider>
     );
+};
+
+// PropTypes for ThemeProvider
+ThemeProvider.propTypes = {
+    children: PropTypes.node.isRequired
 };
 
 // Custom hooks for specific theme needs

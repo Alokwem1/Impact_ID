@@ -3,7 +3,7 @@ Weaving module for Impact ID application.
 """
 
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import random
 
@@ -32,32 +32,37 @@ QUALITY_BONUS_MULTIPLIER = 1.5
 # 🔍 Helper Functions
 # =========================
 
-async def _check_weave_eligibility(user: models.User, db: AsyncSession) -> tuple[bool, int]:
+def _utcnow() -> datetime:
+    """Return a naive UTC datetime without using utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+def _check_weave_eligibility(user: models.User) -> tuple[bool, int]:
     """Check if user can weave and return cooldown info."""
     if not user.last_weave_timestamp:
         return True, 0
 
     next_weave_time = user.last_weave_timestamp + timedelta(hours=WEAVE_COOLDOWN_HOURS)
-    if datetime.utcnow() < next_weave_time:
-        time_remaining = (next_weave_time - datetime.utcnow()).total_seconds()
+    if _utcnow() < next_weave_time:
+        time_remaining = (next_weave_time - _utcnow()).total_seconds()
         return False, int(time_remaining)
 
     return True, 0
 
 async def _get_daily_weave_count(user: models.User, db: AsyncSession) -> int:
     """Get user's weave count for today."""
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
-    stmt = select(func.count(models.TaskSubmission.id)).where(
+    # Count WeaveSubmission rows for the current day
+    stmt = select(func.count(models.WeaveSubmission.id)).where(
         and_(
-            models.TaskSubmission.user_id == user.id,
-            models.TaskSubmission.created_at >= today_start
+            models.WeaveSubmission.user_id == user.id,
+            models.WeaveSubmission.created_at >= today_start
         )
     )
     result = await db.execute(stmt)
     return result.scalar() or 0
 
-async def _calculate_essence_reward(submission: schemas.WeaveSubmission, thread: models.ImpactThread) -> int:
+def _calculate_essence_reward(submission: schemas.WeaveSubmission, thread: models.ImpactThread) -> int:
     """Calculate essence reward based on submission quality and thread complexity."""
     base_reward = random.randint(ESSENCE_REWARD_MIN, ESSENCE_REWARD_MAX)
 
@@ -85,7 +90,7 @@ async def get_weaving_status(
     Checks the user's readiness to weave and their current essence balance.
     Includes daily limit tracking and enhanced status information.
     """
-    is_ready, time_remaining_seconds = await _check_weave_eligibility(current_user, db)
+    is_ready, time_remaining_seconds = _check_weave_eligibility(current_user)
     daily_weaves = await _get_daily_weave_count(current_user, db)
 
     # Check daily limit
@@ -97,16 +102,20 @@ async def get_weaving_status(
         models.ImpactThread.status == 'raw'
     )
     result = await db.execute(stmt)
-    available_threads = result.scalar() or 0
+    threads_available = result.scalar() or 0
+
+    # Compute next bonus multiplier (placeholder logic: no bonus by default)
+    next_bonus_multiplier = 1.0
 
     return schemas.WeavingStatus(
         is_ready=is_ready,
         time_remaining_seconds=time_remaining_seconds,
         essence_balance=current_user.essence_balance,
-        daily_weaves_completed=daily_weaves,
-        daily_weaves_limit=MAX_THREADS_PER_USER_PER_DAY,
-        available_threads=available_threads,
-        streak=getattr(current_user, 'weaving_streak', 0)
+        threads_available=threads_available,
+        weaving_streak=getattr(current_user, 'weaving_streak', 0),
+        daily_weaving_limit=MAX_THREADS_PER_USER_PER_DAY,
+        daily_weavings_used=daily_weaves,
+        next_bonus_multiplier=next_bonus_multiplier,
     )
 
 @router.get("/available-threads", response_model=list[schemas.ImpactThreadPublic])
@@ -120,7 +129,7 @@ async def get_available_threads(
     Get a list of available threads for weaving with optional filtering.
     """
     # Check eligibility first
-    is_ready, _ = await _check_weave_eligibility(current_user, db)
+    is_ready, _ = _check_weave_eligibility(current_user)
     if not is_ready:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -157,7 +166,7 @@ async def claim_thread(
     Claims a specific thread for weaving with enhanced validation.
     """
     # Check cooldown and daily limits
-    is_ready, _ = await _check_weave_eligibility(current_user, db)
+    is_ready, _ = _check_weave_eligibility(current_user)
     if not is_ready:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -188,7 +197,7 @@ async def claim_thread(
     # Mark thread as claimed (optional - you might want to add a 'claimed' status)
     # thread.status = 'claimed'
     # thread.claimed_by = current_user.id
-    # thread.claimed_at = datetime.utcnow()
+    # thread.claimed_at = utcnow()
     # await db.commit()
 
     return thread
@@ -198,24 +207,62 @@ async def submit_weave(
     thread_id: int,
     submission: schemas.WeaveSubmission,
     background_tasks: BackgroundTasks,
-    current_user: models.User = Depends(auth.get_current_user_async),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user_async)
 ):
     """
     Submits the result of a weave with enhanced validation and rewards.
     """
     # Re-verify eligibility at submission time (security)
-    is_ready, _ = await _check_weave_eligibility(current_user, db)
+    is_ready, _ = _check_weave_eligibility(current_user)
     if not is_ready:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Cooldown active. Cannot submit yet."
         )
 
-    # Get thread with row-level locking to prevent race conditions
-    stmt = select(models.ImpactThread).where(
-        models.ImpactThread.id == thread_id
-    ).with_for_update()
+    # Get and validate thread
+    thread = await _get_and_lock_thread(db, thread_id)
+    
+    # Validate submission
+    _validate_weave_submission(submission)
+
+    try:
+        # Process the weave submission
+        result = await _process_weave_submission(
+            thread, submission, current_user, background_tasks, db
+        )
+        await db.commit()
+        return result
+
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This thread was just claimed by another user. Please try a different thread."
+    )
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing your weave."
+    )
+
+
+async def _get_and_lock_thread(db: AsyncSession, thread_id: int) -> models.ImpactThread:
+    """Get thread with row-level locking to prevent race conditions."""
+    # Use FOR UPDATE only if the DB supports it (SQLite does not)
+    use_for_update = True
+    try:
+        if getattr(getattr(db, "bind", None), "dialect", None) and db.bind.dialect.name == "sqlite":
+            use_for_update = False
+    except Exception:
+        use_for_update = False
+
+    stmt = select(models.ImpactThread).where(models.ImpactThread.id == thread_id)
+    if use_for_update:
+        stmt = stmt.with_for_update()
+
     result = await db.execute(stmt)
     thread = result.scalars().first()
 
@@ -223,15 +270,19 @@ async def submit_weave(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Thread not found."
-        ) from e
+        )
 
     if thread.status != 'raw':
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This thread has already been woven or is no longer available."
         )
+    
+    return thread
 
-    # Validate submission
+
+def _validate_weave_submission(submission: schemas.WeaveSubmission) -> None:
+    """Validate the weave submission data."""
     if not submission.category or not submission.reasoning:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -252,70 +303,72 @@ async def submit_weave(
             detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
         )
 
-    try:
-        # Get the user's daily weave count before submission
-        daily_weaves = await _get_daily_weave_count(current_user, db)
 
-        # Create weave submission record
-        weave_submission = models.TaskSubmission(
-            user_id=current_user.id,
-            thread_id=thread.id,
-            category=submission.category,
-            reasoning=submission.reasoning,
-            created_at=datetime.utcnow()
-        )
-        db.add(weave_submission)
+async def _process_weave_submission(
+    thread: models.ImpactThread,
+    submission: schemas.WeaveSubmission,
+    current_user: models.User,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession
+) -> schemas.WeaveResult:
+    """Process the weave submission and update records."""
+    # Get the user's daily weave count before submission
+    daily_weaves = await _get_daily_weave_count(current_user, db)
 
-        # Update thread status
-        thread.status = 'woven'
-        thread.woven_by = current_user.id
-        thread.woven_at = datetime.utcnow()
+    # Create weave submission record (use WeaveSubmission model)
+    weave_submission = models.WeaveSubmission(
+        user_id=current_user.id,
+        thread_id=thread.id,
+        category=submission.category,
+        insight=submission.reasoning,
+        created_at=_utcnow(),
+    )
+    db.add(weave_submission)
 
-        # Calculate rewards
-        essence_earned = await _calculate_essence_reward(submission, thread)
+    # Update thread status and stats
+    thread.status = 'woven'
+    thread.last_woven_at = _utcnow()
+    thread.weaving_count = (thread.weaving_count or 0) + 1
 
-        # Update user stats
-        current_user.essence_balance += essence_earned
-        current_user.last_weave_timestamp = datetime.utcnow()
+    # Calculate and apply rewards
+    essence_earned = _calculate_essence_reward(submission, thread)
+    weave_submission.essence_earned = essence_earned
+    
+    # Update user stats
+    _update_user_weaving_stats(current_user, essence_earned)
 
-        # Update weaving streak
-        if hasattr(current_user, 'weaving_streak'):
-            current_user.weaving_streak += 1
+    # Background task for achievements/notifications
+    background_tasks.add_task(
+        _check_weaving_achievements,
+        current_user.id,
+        daily_weaves + 1
+    )
 
-        # XP bonus for weaving
-        xp_earned = essence_earned // 2
-        current_user.xp += xp_earned
+    return schemas.WeaveResult(
+        essence_earned=essence_earned,
+        xp_earned=essence_earned // 2,
+        new_essence_balance=current_user.essence_balance,
+        new_xp=current_user.xp,
+        streak=getattr(current_user, 'weaving_streak', 1),
+        quality_bonus=essence_earned > ESSENCE_REWARD_MAX
+    )
 
-        await db.commit()
 
-        # Background task for achievements/notifications
-        background_tasks.add_task(
-            _check_weaving_achievements,
-            current_user.id,
-            daily_weaves + 1
-        )
+def _update_user_weaving_stats(user: models.User, essence_earned: int) -> None:
+    """Update user's weaving-related statistics."""
+    user.essence_balance += essence_earned
+    user.last_weave_timestamp = _utcnow()
 
-        return schemas.WeaveResult(
-            essence_earned=essence_earned,
-            xp_earned=xp_earned,
-            new_essence_balance=current_user.essence_balance,
-            new_xp=current_user.xp,
-            streak=getattr(current_user, 'weaving_streak', 1),
-            quality_bonus=essence_earned > ESSENCE_REWARD_MAX
-        )
+    # Update weaving streak
+    if hasattr(user, 'weaving_streak'):
+        user.weaving_streak += 1
+    # Increment total threads woven if tracked
+    if hasattr(user, 'total_threads_woven'):
+        user.total_threads_woven = (user.total_threads_woven or 0) + 1
 
-    except IntegrityError as e:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This thread was just claimed by another user. Please try a different thread."
-        ) from e
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while processing your weave."
-        ) from e
+    # XP bonus for weaving
+    xp_earned = essence_earned // 2
+    user.xp += xp_earned
 
 @router.get("/leaderboard", response_model=list[schemas.WeavingLeaderboardEntry])
 async def get_weaving_leaderboard(
@@ -327,7 +380,7 @@ async def get_weaving_leaderboard(
     Get weaving leaderboard for specified time period.
     """
     # Calculate date filter
-    now = datetime.utcnow()
+    now = _utcnow()
     if period == "daily":
         start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "weekly":
@@ -337,20 +390,20 @@ async def get_weaving_leaderboard(
     else:  # all-time
         start_date = datetime.min
 
-    # Query leaderboard
+    # Query leaderboard using WeaveSubmission
     stmt = select(
         models.User.id,
         models.User.username,
-        func.count(models.TaskSubmission.id).label('weave_count'),
-        func.sum(models.TaskSubmission.essence_earned).label('total_essence')
+        func.count(models.WeaveSubmission.id).label('weave_count'),
+        func.sum(models.WeaveSubmission.essence_earned).label('total_essence'),
     ).join(
-        models.TaskSubmission, models.User.id == models.TaskSubmission.user_id
+        models.WeaveSubmission, models.User.id == models.WeaveSubmission.user_id
     ).where(
-        models.TaskSubmission.created_at >= start_date
+        models.WeaveSubmission.created_at >= start_date
     ).group_by(
         models.User.id, models.User.username
     ).order_by(
-        func.count(models.TaskSubmission.id).desc()
+        func.count(models.WeaveSubmission.id).desc()
     ).limit(limit)
 
     result = await db.execute(stmt)
@@ -368,7 +421,7 @@ async def get_weaving_leaderboard(
 # 🎖️ Background Tasks
 # =========================
 
-async def _check_weaving_achievements(user_id: int, daily_weaves: int):
+def _check_weaving_achievements(user_id: int, daily_weaves: int):
     """Check and award weaving-related achievements."""
     # Implementation for checking achievements
     # This would typically check for milestones like:

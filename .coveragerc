@@ -1,0 +1,22 @@
+[#] Backend coverage configuration
+[run]
+branch = True
+source = backend/app
+omit = 
+    backend/app/tests/*
+    backend/app/**/__init__.py
+    backend/app/**/migrations/*
+    backend/app/**/alembic/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.
+    raise NotImplementedError
+    pass
+show_missing = True
+skip_covered = True
+fail_under = 70
+
+[html]
+directory = coverage_backend_html

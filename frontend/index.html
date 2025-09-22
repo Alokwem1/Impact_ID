@@ -2,7 +2,8 @@
 <html lang="en" class="scroll-smooth">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
     
     <!-- ================================
          🎯 CORE IMPACT ID BRANDING
@@ -163,25 +164,7 @@
         --animation-normal: 300ms;
         --animation-slow: 500ms;
       }
-        /* Responsive loader spinner */
-        .loading-spinner {
-          width: 32px;
-          height: 32px;
-          border-width: 4px;
-          border-style: solid;
-          border-color: var(--color-surface);
-          border-top-color: var(--color-primary);
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin: 0 auto;
-          will-change: transform;
-          backface-visibility: hidden;
-        }
-        /* Responsive progress bar initial state */
-        #load-progress {
-          width: 0%;
-          transition: width var(--animation-slow) cubic-bezier(0.4, 0, 0.2, 1);
-        }
+        /* Removed duplicate loading-spinner block; see enhanced version below */
       
       @media (prefers-color-scheme: dark) {
         :root {
@@ -192,7 +175,7 @@
         }
       }
       
-      /* Enhanced loading spinner with GPU acceleration */
+      /* Loading spinner with GPU acceleration */
       .loading-spinner {
         width: 40px;
         height: 40px;
@@ -524,6 +507,7 @@
   </head>
   
   <body class="bg-gray-100 dark:bg-gray-900 transition-colors duration-200">
+    <a href="#root" class="skip-link">Skip to main content</a>
     <!-- Accessibility skip link -->
     <a href="#main-content" class="skip-link">Skip to main content</a>
     
@@ -547,8 +531,8 @@
           </div>
         </div>
         
-        <!-- Enhanced Loading Animation -->
-        <div class="loading-spinner mb-6" role="status" aria-label="Loading"></div>
+  <!-- Enhanced Loading Animation -->
+  <div class="loading-spinner mb-6" aria-label="Loading"></div>
         
         <!-- Progress Indicators -->
         <div class="mt-6 space-y-3">
@@ -556,7 +540,7 @@
             Initializing platform...
           </div>
           <div class="w-64 h-2 bg-gray-200 dark:bg-gray-700 rounded-full mx-auto overflow-hidden">
-            <div id="load-progress" class="progress-bar h-full rounded-full" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Loading Progress"></div>
+            <progress id="load-progress" class="progress-bar h-full rounded-full w-full" value="0" max="100" aria-label="Loading Progress"></progress>
           </div>
           <div id="load-tip" class="text-xs text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
             💡 Tip: Create your first Impact ID by completing a task!
@@ -588,7 +572,7 @@
     <!-- ================================
          ⚡ MAIN APPLICATION MOUNT
          ================================ -->
-    <div id="root" class="js-loading min-h-screen" role="main" aria-label="Impact ID Application">
+  <div id="root" class="js-loading min-h-screen" aria-label="Impact ID Application">
       <!-- This is where your entire React application will be mounted -->
     </div>
   <main id="main-content" class="hidden-content">
@@ -677,8 +661,13 @@
             
             if (statusEl) statusEl.textContent = step.text;
             if (progressEl) {
-              progressEl.style.width = step.progress + '%';
-              progressEl.setAttribute('aria-valuenow', step.progress);
+              try {
+                progressEl.value = step.progress;
+              } catch (e) {
+                // Fallback for non-progress element
+                progressEl.style.width = step.progress + '%';
+                progressEl.setAttribute('aria-valuenow', step.progress);
+              }
             }
             if (tipEl) tipEl.textContent = step.tip;
             
@@ -714,12 +703,13 @@
           e.preventDefault();
           deferredPrompt = e;
           
-          // Show install prompt after user has been on site for 30 seconds
+          // Show install prompt after user has been on site (3s in dev, 30s in production)
+          const delay = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 3000 : 30000;
           setTimeout(() => {
             if (!installPromptShown && !localStorage.getItem('pwa-dismissed')) {
               showInstallPrompt();
             }
-          }, 30000);
+          }, delay);
         });
         
         const showInstallPrompt = () => {

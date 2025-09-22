@@ -25,6 +25,8 @@ from app.utils.token import (
     get_user_sessions,
     revoke_user_sessions
 )
+# Correct import for utcnow utility (previous path caused NameError during auth flows)
+from app.utils.common import utcnow
 logger = logging.getLogger(__name__)
 
 # ================================
@@ -161,7 +163,7 @@ async def get_current_user_async(
             )
 
         # Update last seen activity
-        user.last_active = datetime.utcnow()
+        user.last_active = utcnow()
         await db.commit()
 
         # Add token payload to user for access in endpoints
@@ -271,7 +273,7 @@ def require_elevated_access_async():
 
         # Check if token is elevated or recent
         if not token_payload.is_elevated:
-            token_age = datetime.utcnow() - token_payload.issued_at
+            token_age = utcnow() - token_payload.issued_at
             if token_age > timedelta(minutes=15):  # Require recent authentication
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -410,7 +412,7 @@ class AuthRateLimiter:
 
     def can_attempt(self, identifier: str, max_attempts: int = 5, window_minutes: int = 15) -> bool:
         """Check if authentication attempt is allowed."""
-        now = datetime.utcnow()
+        now = utcnow()
         window_start = now - timedelta(minutes=window_minutes)
 
         # Clean old attempts
@@ -429,7 +431,7 @@ class AuthRateLimiter:
         return current_attempts < max_attempts
     def record_attempt(self, identifier: str, failed: bool = False):
         """Record an authentication attempt."""
-        now = datetime.utcnow()
+        now = utcnow()
 
         if identifier not in self.attempts:
             self.attempts[identifier] = []

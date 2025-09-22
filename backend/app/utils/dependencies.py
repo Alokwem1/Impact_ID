@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Activity
 from app.models import TaskSubmission
 from app.auth import get_current_user_async  # Import from your existing auth module
+from app.utils.token import TokenSecurityManager, TokenType
 from app.database import get_db
 from app.models import User
 
@@ -26,10 +27,25 @@ def get_client_ip(request) -> str:
     return request.client.host if request.client else "unknown"
 
 # Placeholder for verify_token and SecurityContext since app.security doesn't exist
+_token_manager = TokenSecurityManager()
+
 def verify_token(token: str, token_type: str):
-    """Placeholder for token verification."""
-    # This should be implemented based on your JWT library
-    raise NotImplementedError("Token verification not implemented")
+    """Minimal wrapper delegating to TokenSecurityManager for access tokens.
+
+    Returns a payload-like object with at least 'sub' attribute (user id) for
+    compatibility with existing code expecting payload.sub.
+    """
+    expected = TokenType.ACCESS if token_type == "access" else None
+    payload = _token_manager.verify_token(token, expected_type=expected)
+    # Provide attribute access alias used downstream (sub)
+    class _PayloadProxy:
+        def __init__(self, p):
+            self._p = p
+            self.sub = p.user_id
+            self.iat = p.issued_at
+        def __getattr__(self, item):
+            return getattr(self._p, item)
+    return _PayloadProxy(payload)
 
 class SecurityContext:
     """Placeholder for SecurityContext."""
@@ -55,12 +71,6 @@ async def get_current_user(
     """
     🎯 Get current authenticated user from JWT token.
     """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
     try:
         # Verify token
         payload = verify_token(credentials.credentials, "access")
@@ -68,13 +78,11 @@ async def get_current_user(
 
         if user_id is None:
             logger.warning("Token missing user ID")
-            try:
-
-                pass
-
-            except Exception as e:
-
-                raise HTTPException(status_code=500, detail="Error") from e
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         # Get user from database
         stmt = select(User).where(User.id == int(user_id))
@@ -83,17 +91,15 @@ async def get_current_user(
 
         if user is None:
             logger.warning("User %s not found in database", user_id)
-            try:
-
-                pass
-
-            except Exception as e:
-
-                raise HTTPException(status_code=500, detail="Error") from e
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         # Check user status
         if user.status not in ["active", "verified"]:
-            logger.warning("User %s has status: {user.status}", user_id)
+            logger.warning("User %s has status: %s", user_id, user.status)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Account is {user.status}"
@@ -109,13 +115,11 @@ async def get_current_user(
         raise
     except Exception as e:
         logger.error("Authentication error: %s", e)
-        try:
-
-            pass
-
-        except Exception as e:
-
-            raise HTTPException(status_code=500, detail="Error") from e
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 async def get_current_user_optional(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(oauth2_scheme_optional),
@@ -135,7 +139,7 @@ async def get_current_user_optional(
         # Return None for invalid tokens instead of raising exception
         return None
 
-async def get_current_active_user(
+def get_current_active_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
     """
@@ -156,7 +160,7 @@ def require_role(required_role: str):
     """
     🎭 Dependency factory for role-based access control.
     """
-    async def role_checker(current_user: User = Depends(get_current_user)) -> User:
+    def role_checker(current_user: User = Depends(get_current_user)) -> User:
         role_hierarchy = {
             "user": 1,
             "moderator": 2,
@@ -185,7 +189,7 @@ def require_roles(required_roles: List[str]):
     """
     🎭 Dependency factory for multiple role access control.
     """
-    async def roles_checker(current_user: User = Depends(get_current_user)) -> User:
+    def roles_checker(current_user: User = Depends(get_current_user)) -> User:
         if current_user.role not in required_roles:
             logger.warning(
                 "User %s attempted to access endpoint requiring roles {required_roles} with role {current_user.role}",
@@ -209,11 +213,10 @@ require_moderator_or_admin = require_roles(["moderator", "admin"])
 # 🔐 PERMISSION-BASED ACCESS CONTROL
 # ================================
 
-async def check_user_permission(
+def check_user_permission(
     user: User,
     permission: str,
-    resource_id: Optional[int] = None,
-    db: AsyncSession = None
+    resource_id: Optional[int] = None
 ) -> bool:
     """
     🔐 Check if user has specific permission.
@@ -355,7 +358,7 @@ def require_resource_ownership(resource_type: str, resource_id_param: str):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid resource ID format"
-            ) from e
+            )
 
         # Admin bypass
         if current_user.role == "admin":
@@ -401,26 +404,25 @@ def get_user_identifier(
 # 🔍 LOGGING AND AUDIT DEPENDENCIES
 # ================================
 
-async def log_user_action(
+def log_user_action(
     action: str,
     current_user: User = Depends(get_current_user),
-    request: Request = None,
-    db: AsyncSession = Depends(get_db)
+    request: Request = None
 ):
     """
     📝 Log user action for audit trail.
     """
     try:
         # You can implement audit logging here
-        logger.info("User %s performed action: {action}", current_user.id)
+        logger.info("User %s performed action: %s", current_user.id, action)
 
         # Store in audit log table if needed
         # audit_entry = AuditLog(
         #     user_id=current_user.id,
         #     action=action,
         #     ip_address=get_client_ip(request) if request else None,
-        #     user_agent=request.getattr(headers, "user-agent", None) if request else None,
-        #     timestamp=datetime.utcnow()
+        #     user_agent=request.headers.get("user-agent", None) if request else None,
+        #     timestamp=utcnow()
         # )
         # db.add(audit_entry)
         # await db.commit()
@@ -469,7 +471,7 @@ def require_feature_enabled(feature_name: str):
     """
     🎮 Dependency factory for feature flag validation.
     """
-    async def feature_checker():
+    def feature_checker():
         # Check if feature is enabled (you can implement feature flags here)
         # For now, all features are enabled
         feature_enabled = True  # You can check from config/database
@@ -488,10 +490,7 @@ def require_feature_enabled(feature_name: str):
 # 🔐 API KEY AUTHENTICATION
 # ================================
 
-async def get_api_key_user(
-    api_key: str,
-    db: AsyncSession = Depends(get_db)
-) -> Optional[User]:
+def get_api_key_user() -> Optional[User]:
     """
     🔑 Authenticate user by API key.
     """

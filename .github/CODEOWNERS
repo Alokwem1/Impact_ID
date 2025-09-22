@@ -1,0 +1,7 @@
+# CODEOWNERS - default reviewers/owners for repository sections
+# Format: pattern  owner1  owner2
+# Replace @your-org/team with actual GitHub handles or teams
+
+*       @Alokwem1
+backend/*  @Alokwem1
+frontend/* @Alokwem1

@@ -1,0 +1,28 @@
+# Frontend Docker Ignore
+
+# Dependencies
+node_modules/
+
+# Build output
+.dist/
+dist/
+
+# Test & coverage artifacts
+coverage/
+.vitest/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Env files
+.env
+.env.local
+
+# IDE / tooling
+.vscode/
+.idea/
+*.iml

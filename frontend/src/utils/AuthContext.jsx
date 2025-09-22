@@ -1,6 +1,8 @@
-import { createContext, useState, useEffect, useContext, useCallback } from 'react';
+import { createContext, useState, useEffect, useContext, useCallback, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useLocation } from 'react-router-dom';
 import apiClient from '../api/axios';
+import { authEvents, AUTH_EVENT } from './authEvents';
 import toast from 'react-hot-toast';
 
 // Create Auth Context
@@ -23,6 +25,7 @@ export const AuthProvider = ({ children }) => {
     const [authMethod, setAuthMethod] = useState(null); // 'traditional' or 'wallet'
     const [sessionInfo, setSessionInfo] = useState(null);
     const [permissions, setPermissions] = useState([]);
+    const queryClient = useQueryClient();
     
     const navigate = useNavigate();
     const location = useLocation();
@@ -130,13 +133,25 @@ export const AuthProvider = ({ children }) => {
                 password
             });
 
+            if (!response || !response.data || typeof response.data !== 'object') {
+                throw new Error('Malformed login response');
+            }
+
             const { access_token, token_type, expires_in, username: returnedUsername, user_id } = response.data;
             
             // Store token with remember me preference
             storeToken(access_token, rememberMe);
             
-            // Fetch complete user profile
+            // Fetch complete user profile then invalidate auth related caches
             await fetchUser();
+            authEvents.emit(AUTH_EVENT.LOGIN, { username: returnedUsername || username });
+            // Invalidate stale caches tied to previous anonymous state
+            try {
+                const { authInvalidateTargets } = await import('../api/queryKeys');
+                authInvalidateTargets.forEach(key => queryClient.invalidateQueries({ queryKey: key }));
+            } catch (e) {
+                if (import.meta.env.DEV) console.warn('Query invalidation (login) failed:', e);
+            }
             
             toast.success(`Welcome back, ${returnedUsername || username}!`, { id: toastId });
             
@@ -200,7 +215,7 @@ export const AuthProvider = ({ children }) => {
                 signature,
                 message
             });
-
+            if (!response || !response.data) throw new Error('Malformed wallet login response');
             const { access_token, token_type } = response.data;
             
             // Store token (wallet logins typically use session storage)
@@ -232,10 +247,11 @@ export const AuthProvider = ({ children }) => {
         
         try {
             // ✅ FIXED: Use correct change password endpoint
-            await apiClient.post('/api/auth/change-password', {
+            const response = await apiClient.post('/api/auth/change-password', {
                 current_password: currentPassword,
                 new_password: newPassword
             });
+            if (!response || response.status >= 400) throw new Error('Password change failed');
             
             toast.success('Password updated successfully!', { id: toastId });
             return true;
@@ -252,9 +268,10 @@ export const AuthProvider = ({ children }) => {
         
         try {
             // ✅ FIXED: Use correct forgot password endpoint
-            await apiClient.post('/api/auth/forgot-password', {
+            const response = await apiClient.post('/api/auth/forgot-password', {
                 email: email.toLowerCase().trim()
             });
+            if (!response || response.status >= 400) throw new Error('Reset email failed');
             
             toast.success('Password reset email sent! Check your inbox.', { 
                 id: toastId,
@@ -282,18 +299,26 @@ export const AuthProvider = ({ children }) => {
             console.warn('Server logout failed:', error);
         }
         
-        // Clear client-side state
+    // Clear client-side state
         clearToken();
         setUser(null);
         setIsAuthenticated(false);
         setAuthMethod(null);
         setSessionInfo(null);
         setPermissions([]);
+    authEvents.emit(AUTH_EVENT.LOGOUT, { manual: true });
         
         if (showMessage) {
             toast.success('Logged out successfully.');
         }
         
+        // Clear all query caches safely (auth-related) and refetch protected queries lazily when needed
+        try {
+            queryClient.clear();
+        } catch (e) {
+            if (import.meta.env.DEV) console.warn('Query cache clear failed:', e);
+        }
+
         navigate('/login', { replace: true });
     };
 
@@ -302,6 +327,7 @@ export const AuthProvider = ({ children }) => {
         try {
             // ✅ FIXED: Use correct refresh endpoint
             const response = await apiClient.post('/api/auth/refresh');
+            if (!response || !response.data) throw new Error('Malformed refresh response');
             const { access_token } = response.data;
             
             // Update stored token
@@ -363,6 +389,15 @@ export const AuthProvider = ({ children }) => {
             // ✅ FIXED: Use correct update profile endpoint matching your backend
             const response = await apiClient.put('/api/users/@me', updates);
             setUser(response.data);
+            try {
+                const { queryKeys } = await import('../api/queryKeys');
+                queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+                if (response.data?.username) {
+                    queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(response.data.username) });
+                }
+            } catch (e) {
+                if (import.meta.env.DEV) console.warn('Query invalidation (profile update) failed:', e);
+            }
             toast.success('Profile updated successfully!', { id: toastId });
             return response.data;
         } catch (error) {
@@ -436,6 +471,51 @@ export const AuthProvider = ({ children }) => {
         getStoredToken,
         clearToken
     };
+
+    // ================================
+    // ⚠️ HARDENED SESSION EXPIRY HANDLING
+    // ================================
+    const sessionExpiredHandledRef = useRef(false);
+
+    const handleSessionExpired = useCallback(() => {
+        if (sessionExpiredHandledRef.current) return;
+        sessionExpiredHandledRef.current = true;
+
+        // Clear tokens & local auth state (avoid server logout call that may 401)
+        clearToken();
+        setUser(null);
+        setIsAuthenticated(false);
+        setAuthMethod(null);
+        setSessionInfo(null);
+        setPermissions([]);
+
+        // Clear react-query cache softly
+        try { queryClient.clear(); } catch (e) { /* silent */ }
+
+        // Emit logout for websocket + other listeners
+        authEvents.emit(AUTH_EVENT.LOGOUT, { forced: true, reason: 'session-expired' });
+
+        // Show toast only if not already displayed
+        toast.error('Session expired. Please log in again.', { id: 'session-expired' });
+
+        // Redirect using router (avoid hard reload)
+        navigate('/login', { replace: true, state: { reason: 'session-expired' } });
+    }, [clearToken, navigate, queryClient]);
+
+    useEffect(() => {
+        const offExpired = authEvents.on(AUTH_EVENT.SESSION_EXPIRED, handleSessionExpired);
+        const offRefreshFailed = authEvents.on(AUTH_EVENT.TOKEN_REFRESH_FAILED, handleSessionExpired);
+        const offLogin = authEvents.on(AUTH_EVENT.LOGIN, () => {
+            // Reset guard so future expiry events are handled
+            sessionExpiredHandledRef.current = false;
+            toast.dismiss('session-expired');
+        });
+        return () => {
+            offExpired();
+            offRefreshFailed();
+            offLogin();
+        };
+    }, [handleSessionExpired]);
 
     return (
         <AuthContext.Provider value={contextValue}>

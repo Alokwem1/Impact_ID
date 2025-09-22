@@ -23,6 +23,8 @@ import aiosmtplib
 import asyncio
 import smtplib
 
+from app.utils.common import utcnow
+
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +146,8 @@ class EmailService:
         🎯 Send email with advanced features and error handling.
         """
         if not self.is_configured():
-            logger.warning("Email not sent to %s. SMTP server is not configured.", to)
-            logger.info("Email Content:\nSubject: %s\nBody: {body or html_body}", subject)
+            logger.warning("Email not sent: smtp not configured recipient=%s", to)
+            logger.info("Email content preview subject=%s body_len=%s html_len=%s", subject, len(body or ''), len(html_body or ''))
             return False
 
         # Normalize recipients
@@ -279,12 +281,12 @@ class EmailService:
         msg["Subject"] = subject
         msg["From"] = f"{self.config.from_name} <{self.config.from_email}>"
         msg["To"] = ", ".join(recipients)
-        msg["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
-        msg["Message-ID"] = f"<{datetime.utcnow().timestamp()}@{self.config.host}>"
+        msg["Date"] = utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
+        msg["Message-ID"] = f"<{utcnow().timestamp()}@{self.config.host}>"
 
         # Add tracking pixel for open tracking
         if track_opens and html_body:
-            tracking_id = f"track_{datetime.utcnow().timestamp()}"
+            tracking_id = f"track_{utcnow().timestamp()}"
             tracking_pixel = f'<img src="https://your-domain.com/email-tracking/{tracking_id}" width="1" height="1" style="display:none;">'
             html_body += tracking_pixel
 
@@ -369,7 +371,7 @@ class EmailService:
     def _record_failure(self, recipients: List[str], subject: str, body: str):
         """Record failed email for retry later."""
         failure_record = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
             "recipients": recipients,
             "subject": subject,
             "body": body[:500]  # Truncate for storage
@@ -396,7 +398,7 @@ class EmailRateLimiter:
 
     async def can_send(self, recipient: str) -> bool:
         """Check if we can send email to recipient."""
-        now = datetime.utcnow()
+        now = utcnow()
         today = now.date()
         current_hour = now.replace(minute=0, second=0, microsecond=0)
 
@@ -437,7 +439,7 @@ class EmailRateLimiter:
 
     async def record_send(self, recipient: str):
         """Record successful email send."""
-        now = datetime.utcnow()
+        now = utcnow()
 
         if recipient not in self.send_history:
             self.send_history[recipient] = []

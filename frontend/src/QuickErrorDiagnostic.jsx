@@ -17,8 +17,9 @@ console.log('Service Worker:', 'serviceWorker' in navigator);
 // 4. Check critical APIs
 const checkAPIs = async () => {
     try {
-        const response = await fetch('http://localhost:8000/health');
-        console.log('✅ Backend health check:', response.status);
+        const base = import.meta.env.VITE_API_BASE_URL || window.location.origin;
+        const response = await fetch(`${base.replace(/\/$/, '')}/health`);
+        console.log('✅ Backend health check:', response.status, response.ok ? 'OK' : 'FAIL');
     } catch (error) {
         console.error('❌ Backend not responding:', error.message);
     }

@@ -1,0 +1,45 @@
+# Python / Backend Ignore
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.env
+.venv
+venv/
+ENV/
+
+# Environment files
+.env.local
+.env.*.backup
+
+# Byte-compiled / cache
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.coverage*
+htmlcov/
+
+# SQLite dev database
+impact.db
+impact.db-shm
+impact.db-wal
+
+# Logs
+logs/
+*.log
+
+# IDE / tooling
+.vscode/
+.idea/
+*.iml
+
+# Build artifacts
+build/
+dist/
+
+# Misc
+.DS_Store
+Thumbs.db

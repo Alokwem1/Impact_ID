@@ -15,6 +15,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app import models, schemas, database, auth
+from app.utils.common import utcnow
 
 
 router = APIRouter(prefix="/activities", tags=["Activities"])
@@ -63,7 +64,7 @@ async def get_activity_feed(
     """
     🌟 Enhanced activity feed with filtering, personalization, and privacy controls.
     """
-    cutoff_time = datetime.utcnow() - timedelta(hours=hours_back)
+    cutoff_time = utcnow() - timedelta(hours=hours_back)
 
     # Build base query
     stmt = select(models.Activity).options(
@@ -112,22 +113,24 @@ async def get_activity_feed(
     # Enrich activities with additional context
     enriched_activities = []
     for activity in activities:
+        # Provide required user fields at construction to satisfy schema
+        user_level = activity.user.level if activity.user else 1
+        user_xp = activity.user.xp if activity.user else 0
+        user_avatar = getattr(activity.user, 'avatar_url', None) if activity.user else None
+
         activity_out = schemas.ActivityOut(
             id=activity.id,
             user_id=activity.user_id,
             username=activity.username,
+            user_avatar=user_avatar,
+            user_level=user_level,
+            user_xp=user_xp,
             action=activity.action,
             detail=activity.detail,
             meta_data=activity.meta_data or {},
             created_at=activity.created_at,
             is_public=activity.is_public
         )
-
-        # Add user avatar and level if available
-        if activity.user:
-            activity_out.user_avatar = getattr(activity.user, 'avatar_url', None)
-            activity_out.user_level = activity.user.level
-            activity_out.user_xp = activity.user.xp
 
         # Add reaction counts if user is authenticated
         if current_user:
@@ -149,7 +152,7 @@ async def get_trending_activities(
     """
     # Calculate time cutoff
     hours_map = {"1h": 1, "6h": 6, "24h": 24, "7d": 168}
-    cutoff_time = datetime.utcnow() - timedelta(hours=hours_map[period])
+    cutoff_time = utcnow() - timedelta(hours=hours_map[period])
 
     # Query activities with reaction counts
     stmt = select(
@@ -169,7 +172,7 @@ async def get_trending_activities(
     ).order_by(
         # Trending score: reactions + recency boost
         (func.count(models.ActivityReaction.id) +
-         func.extract('epoch', datetime.utcnow() - models.Activity.created_at) / 3600).desc()
+         func.extract('epoch', utcnow() - models.Activity.created_at) / 3600).desc()
     ).limit(limit)
 
     result = await db.execute(stmt)
@@ -221,7 +224,7 @@ async def get_activity_stats(
     activity_counts = {row.action: row.count for row in counts_result.all()}
 
     # Recent activity (last 7 days)
-    week_ago = datetime.utcnow() - timedelta(days=7)
+    week_ago = utcnow() - timedelta(days=7)
     recent_count_stmt = select(func.count(models.Activity.id)).where(
         and_(
             models.Activity.user_id == target_user_id,
@@ -301,14 +304,14 @@ async def react_to_activity(
         else:
             # Different reaction - update it
             existing_reaction.reaction_type = reaction_data.reaction_type
-            existing_reaction.created_at = datetime.utcnow()
+            existing_reaction.created_at = utcnow()
     else:
         # New reaction
         new_reaction = models.ActivityReaction(
             activity_id=activity_id,
             user_id=current_user.id,
             reaction_type=reaction_data.reaction_type,
-            created_at=datetime.utcnow()
+            created_at=utcnow()
         )
         db.add(new_reaction)
 
@@ -377,7 +380,7 @@ async def create_activity(
         detail=activity_data.detail,
         meta_data=activity_data.meta_data,
         is_public=activity_data.is_public,
-        created_at=datetime.utcnow()
+        created_at=utcnow()
     )
 
     db.add(new_activity)
@@ -391,11 +394,16 @@ async def create_activity(
         id=new_activity.id,
         user_id=new_activity.user_id,
         username=new_activity.username,
+        user_avatar=getattr(current_user, 'avatar_url', None) if current_user else None,
+        user_level=(current_user.level if current_user else 1),
+        user_xp=(current_user.xp if current_user else 0),
         action=new_activity.action,
         detail=new_activity.detail,
         meta_data=new_activity.meta_data or {},
         created_at=new_activity.created_at,
-        is_public=new_activity.is_public
+        is_public=new_activity.is_public,
+        reaction_counts={},
+        user_reaction=None
     )
 
 # =========================
@@ -494,6 +502,10 @@ async def _get_user_reaction(activity_id: int, user_id: int, db: AsyncSession) -
 
 async def _broadcast_new_activity(activity: models.Activity):
     """Broadcast new activity to all connected WebSocket clients."""
+    global active_connections
+    # Safety: ensure it's a set if something reassigned it
+    if active_connections is None:
+        active_connections = set()
     if not active_connections:
         return
 
@@ -521,6 +533,9 @@ async def _broadcast_new_activity(activity: models.Activity):
 
 async def _broadcast_reaction_update(activity_id: int, reaction_type: str, username: str):
     """Broadcast reaction update to all connected WebSocket clients."""
+    global active_connections
+    if active_connections is None:
+        active_connections = set()
     if not active_connections:
         return
 
@@ -563,7 +578,7 @@ async def create_activity_log(
         detail=detail,
         meta_data=meta_data or {},
         is_public=is_public,
-        created_at=datetime.utcnow()
+        created_at=utcnow()
     )
 
     if db:

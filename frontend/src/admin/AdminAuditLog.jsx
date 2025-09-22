@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryKeys';
 import { 
     ShieldCheckIcon, 
     FunnelIcon, 
@@ -348,7 +349,7 @@ export default function AdminAuditLog() {
         error,
         isFetching 
     } = useQuery({
-        queryKey: ['auditLogs', queryParams],
+        queryKey: queryKeys.admin.auditLogs(queryParams),
         queryFn: () => fetchAuditLogs(queryParams),
         staleTime: 2 * 60 * 1000, // 2 minutes
         retry: 2,

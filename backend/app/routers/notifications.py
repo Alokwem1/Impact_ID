@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models, schemas, auth
 from app.database import get_db
+from app.utils.common import utcnow
 
 
 router = APIRouter()
@@ -62,7 +63,7 @@ async def mark_notification_read(
         )
 
     notification.is_read = True
-    notification.read_at = datetime.utcnow()
+    notification.read_at = utcnow()
     await db.commit()
 
     return {"message": "Notification marked as read"}
@@ -84,7 +85,7 @@ async def mark_all_notifications_read(
 
     for notification in notifications:
         notification.is_read = True
-        notification.read_at = datetime.utcnow()
+        notification.read_at = utcnow()
 
     await db.commit()
 

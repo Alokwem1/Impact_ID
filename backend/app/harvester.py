@@ -13,12 +13,10 @@ import logging
 import os
 import re
 import requests
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from bs4 import BeautifulSoup
-from sqlalchemy import a, funcnd_, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 from textblob import TextBlob
 from urllib.parse import urlparse, urljoin
 import aiohttp
@@ -29,6 +27,7 @@ import time
 
 from app import database, models
 from app.utils.email import send_email, EmailTemplate
+from app.utils.common import utcnow
 
 
 # Download required NLTK data
@@ -43,10 +42,6 @@ except Exception as e:
 # 🔧 Configuration & Setup
 # ================================
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 class ContentType(str, Enum):
@@ -507,7 +502,7 @@ class ImpactHarvester:
                             'title': title,
                             'summary': content[:500],  # Truncate
                             'link': link,
-                            'published': datetime.utcnow().isoformat(),
+                            'published': utcnow().isoformat(),
                             'source': urlparse(base_url).netloc
                         })
 
@@ -590,7 +585,7 @@ class ImpactHarvester:
             'source': source,
             'content_type': content_type.value,
             'published': entry.get('published', ''),
-            'harvested_at': datetime.utcnow().isoformat(),
+            'harvested_at': utcnow().isoformat(),
             'analysis': analysis,
             'quality_grade': self._get_quality_grade(analysis['quality_score']),
             'categories': analysis['categories'],
@@ -601,7 +596,7 @@ class ImpactHarvester:
         impact_thread = models.ImpactThread(
             content=link,
             meta_data=meta_data,
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
             is_active=True
         )
 
@@ -630,7 +625,7 @@ class ImpactHarvester:
                 template=EmailTemplate.ADMIN_NOTIFICATION,
                 subject="Impact Harvester - Completion Report",
                 harvester_stats=self.stats,
-                completion_time=datetime.utcnow().isoformat()
+                completion_time=utcnow().isoformat()
             )
         except Exception as e:
             logger.error("Failed to send completion notification: %s", e)
@@ -722,7 +717,7 @@ async def get_harvester_analytics() -> Dict[str, Any]:
         total_threads = total_result.scalar() or 0
 
         # Recent threads (last 24 hours)
-        yesterday = datetime.utcnow() - timedelta(hours=24)
+        yesterday = utcnow() - timedelta(hours=24)
         recent_stmt = select(func.count(models.ImpactThread.id)).where(
             models.ImpactThread.created_at >= yesterday
         )
@@ -754,7 +749,7 @@ async def get_harvester_analytics() -> Dict[str, Any]:
             'recent_threads_24h': recent_threads,
             'quality_distribution': quality_distribution,
             'source_distribution': source_distribution,
-            'last_updated': datetime.utcnow().isoformat()
+            'last_updated': utcnow().isoformat()
         }
 
 # ================================

@@ -1,0 +1,35 @@
+# Backend Docker Ignore
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache/
+
+# Local env
+.env
+
+# Virtual environments
+venv/
+.env.local
+
+# SQLite dev database & WAL
+impact.db
+impact.db-shm
+impact.db-wal
+
+# Logs
+logs/
+*.log
+
+# IDE / tooling
+.vscode/
+.idea/
+*.iml
+
+# Tests coverage / build artifacts
+htmlcov/
+.coverage*
+.build/
+.dist/

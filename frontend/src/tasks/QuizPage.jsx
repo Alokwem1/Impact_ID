@@ -4,15 +4,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     ClockIcon,
     QuestionMarkCircleIcon,
-    TrophyIcon,
-    BoltIcon,
-    SparklesIcon,
     CheckCircleIcon,
     XCircleIcon,
     ArrowLeftIcon,
     PlayIcon,
     PauseIcon,
-    AcademicCapIcon,
     ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import {
@@ -21,10 +17,10 @@ import {
     SparklesIcon as SparklesIconSolid
 } from '@heroicons/react/24/solid';
 import apiClient from '../api/axios';
+import { queryKeys } from '../api/queryKeys';
 import Layout from '../tasks/Layout';
 import Question from '../tasks/Question';
 import QuizResult from '../tasks/QuizResult';
-import ProgressBar from '../tasks/progressBar';
 import toast from 'react-hot-toast';
 
 // ✅ FIXED: Corrected API endpoint to match your backend
@@ -50,7 +46,7 @@ export default function QuizPage() {
 
     // ✅ ENHANCED: Better error handling and retry logic
     const { data: task, isLoading, isError, error } = useQuery({
-        queryKey: ['task', taskId],
+        queryKey: queryKeys.tasks.detail(taskId),
         queryFn: () => fetchQuizTask(taskId),
         staleTime: 5 * 60 * 1000,
         retry: (failureCount, error) => {
@@ -109,10 +105,10 @@ export default function QuizPage() {
             }
             
             // Invalidate queries to update UI
-            queryClient.invalidateQueries({ queryKey: ['tasks'] });
-            queryClient.invalidateQueries({ queryKey: ['task', taskId] });
-            queryClient.invalidateQueries({ queryKey: ['user_profile'] });
-            queryClient.invalidateQueries({ queryKey: ['userDashboard'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(taskId) });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.dashboard() });
         },
         onError: (err) => {
             console.error('Quiz submission error:', err);
@@ -222,6 +218,126 @@ export default function QuizPage() {
         const minutes = Math.floor(seconds / 60);
         const remainingSeconds = seconds % 60;
         return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    };
+
+    // Render helpers to reduce nested ternaries and improve readability
+    const renderStartScreen = () => (
+        <div className="p-8 text-center">
+            <div className="mb-6">
+                <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <PlayIcon className="h-10 w-10 text-blue-600" />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Ready to Start?</h2>
+                <p className="text-gray-600">
+                    This quiz contains 1 question. Read carefully and select your answer.
+                </p>
+            </div>
+
+            {task.time_limit_minutes && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
+                    <div className="flex items-center justify-center space-x-2 text-orange-800">
+                        <ClockIcon className="h-5 w-5" />
+                        <span className="font-medium">
+                            Time Limit: {task.time_limit_minutes} minutes
+                        </span>
+                    </div>
+                </div>
+            )}
+
+            <button
+                onClick={handleStartQuiz}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-3 px-8 rounded-lg transition-all duration-200 transform hover:scale-105"
+            >
+                Start Quiz
+            </button>
+        </div>
+    );
+
+    const renderResults = () => (
+        <div className="p-6">
+            <QuizResult 
+                score={isCorrect ? 1 : 0} 
+                total={1}
+                onRestart={canAttempt ? handleRestart : null}
+                onContinue={() => navigate('/tasks')}
+                quizId={taskId}
+                taskTitle={task.title}
+                showActions={!isSubmitting}
+            />
+        </div>
+    );
+
+    const renderQuestion = () => (
+        <div className="p-6">
+            {/* Timer and Controls */}
+            <div className="flex items-center justify-between mb-6 p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2 text-gray-600">
+                        <ClockIcon className="h-5 w-5" />
+                        <span className="font-medium">Time: {formatTime(timeSpent)}</span>
+                    </div>
+                    {timeRemaining && timeRemaining > 0 && (
+                        <div className="flex items-center space-x-2 text-orange-600">
+                            <ExclamationTriangleIcon className="h-5 w-5" />
+                            <span className="font-medium">
+                                Remaining: {formatTime(timeRemaining)}
+                            </span>
+                        </div>
+                    )}
+                </div>
+                <button
+                    onClick={handlePauseResume}
+                    className="flex items-center space-x-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                    {isPaused ? (
+                        <>
+                            <PlayIcon className="h-4 w-4" />
+                            <span>Resume</span>
+                        </>
+                    ) : (
+                        <>
+                            <PauseIcon className="h-4 w-4" />
+                            <span>Pause</span>
+                        </>
+                    )}
+                </button>
+            </div>
+
+            {/* Pause Overlay */}
+            {isPaused && (
+                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-10 rounded-xl">
+                    <div className="bg-white p-8 rounded-lg text-center">
+                        <PauseIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Quiz Paused</h3>
+                        <p className="text-gray-600 mb-4">Click Resume to continue</p>
+                        <button
+                            onClick={handlePauseResume}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors"
+                        >
+                            Resume
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ✅ ENHANCED: Question Component with Submit Handler */}
+            <Question
+                question={task.quiz_question}
+                onAnswerSelect={handleAnswerSelect}
+                onNext={handleSubmitQuiz}
+                disabled={isPaused || isSubmitting}
+                isSubmitting={isSubmitting}
+                selectedAnswer={selectedAnswer}
+                showSubmitButton={true}
+                submitButtonText={isSubmitting ? 'Submitting...' : 'Submit Answer'}
+            />
+        </div>
+    );
+
+    const renderQuizPanelInner = () => {
+        if (!quizStarted) return renderStartScreen();
+        if (showResults) return renderResults();
+        return renderQuestion();
     };
 
     // Validation
@@ -343,7 +459,7 @@ export default function QuizPage() {
                                 Browse More Tasks
                             </Link>
                             <Link 
-                                to="/my-submissions"
+                                to="/submissions"
                                 className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-lg transition-colors"
                             >
                                 View Submissions
@@ -443,119 +559,7 @@ export default function QuizPage() {
 
                 {/* Quiz Content */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden relative">
-                    {!quizStarted ? (
-                        /* Quiz Start Screen */
-                        <div className="p-8 text-center">
-                            <div className="mb-6">
-                                <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <PlayIcon className="h-10 w-10 text-blue-600" />
-                                </div>
-                                <h2 className="text-2xl font-bold text-gray-900 mb-2">Ready to Start?</h2>
-                                <p className="text-gray-600">
-                                    This quiz contains 1 question. Read carefully and select your answer.
-                                </p>
-                            </div>
-
-                            {task.time_limit_minutes && (
-                                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
-                                    <div className="flex items-center justify-center space-x-2 text-orange-800">
-                                        <ClockIcon className="h-5 w-5" />
-                                        <span className="font-medium">
-                                            Time Limit: {task.time_limit_minutes} minutes
-                                        </span>
-                                    </div>
-                                </div>
-                            )}
-
-                            <button
-                                onClick={handleStartQuiz}
-                                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-3 px-8 rounded-lg transition-all duration-200 transform hover:scale-105"
-                            >
-                                Start Quiz
-                            </button>
-                        </div>
-                    ) : showResults ? (
-                        /* Quiz Results */
-                        <div className="p-6">
-                            <QuizResult 
-                                score={isCorrect ? 1 : 0} 
-                                total={1}
-                                onRestart={canAttempt ? handleRestart : null}
-                                onContinue={() => navigate('/tasks')}
-                                quizId={taskId}
-                                taskTitle={task.title}
-                                showActions={!isSubmitting}
-                            />
-                        </div>
-                    ) : (
-                        /* Quiz Question */
-                        <div className="p-6">
-                            {/* Timer and Controls */}
-                            <div className="flex items-center justify-between mb-6 p-4 bg-gray-50 rounded-lg">
-                                <div className="flex items-center space-x-4">
-                                    <div className="flex items-center space-x-2 text-gray-600">
-                                        <ClockIcon className="h-5 w-5" />
-                                        <span className="font-medium">Time: {formatTime(timeSpent)}</span>
-                                    </div>
-                                    
-                                    {timeRemaining && timeRemaining > 0 && (
-                                        <div className="flex items-center space-x-2 text-orange-600">
-                                            <ExclamationTriangleIcon className="h-5 w-5" />
-                                            <span className="font-medium">
-                                                Remaining: {formatTime(timeRemaining)}
-                                            </span>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <button
-                                    onClick={handlePauseResume}
-                                    className="flex items-center space-x-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                                >
-                                    {isPaused ? (
-                                        <>
-                                            <PlayIcon className="h-4 w-4" />
-                                            <span>Resume</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <PauseIcon className="h-4 w-4" />
-                                            <span>Pause</span>
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-
-                            {/* Pause Overlay */}
-                            {isPaused && (
-                                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-10 rounded-xl">
-                                    <div className="bg-white p-8 rounded-lg text-center">
-                                        <PauseIcon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Quiz Paused</h3>
-                                        <p className="text-gray-600 mb-4">Click Resume to continue</p>
-                                        <button
-                                            onClick={handlePauseResume}
-                                            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors"
-                                        >
-                                            Resume
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* ✅ ENHANCED: Question Component with Submit Handler */}
-                            <Question
-                                question={task.quiz_question}
-                                onAnswerSelect={handleAnswerSelect}
-                                onNext={handleSubmitQuiz}
-                                disabled={isPaused || isSubmitting}
-                                isSubmitting={isSubmitting}
-                                selectedAnswer={selectedAnswer}
-                                showSubmitButton={true}
-                                submitButtonText={isSubmitting ? 'Submitting...' : 'Submit Answer'}
-                            />
-                        </div>
-                    )}
+                    {renderQuizPanelInner()}
                 </div>
             </div>
         </Layout>

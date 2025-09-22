@@ -89,7 +89,8 @@ export default function WeavingView({
     submitting = false,
     userStats = null,
     showAdvanced = false,
-    estimatedReward = { min: 3, max: 8 }
+    estimatedReward = { min: 3, max: 8 },
+    onToggleAdvanced = () => {}
 }) {
     const [selectedCategory, setSelectedCategory] = useState(null);
     const [reasoning, setReasoning] = useState('');
@@ -470,7 +471,7 @@ export default function WeavingView({
                                 )}
                             </button>
                             <button
-                                onClick={() => setShowAdvanced(false)}
+                                onClick={() => onToggleAdvanced(false)}
                                 disabled={submitting}
                                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
                             >
@@ -480,7 +481,7 @@ export default function WeavingView({
                     ) : (
                         <>
                             <button
-                                onClick={() => setShowAdvanced(true)}
+                                onClick={() => onToggleAdvanced(true)}
                                 disabled={submitting}
                                 className="flex-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 disabled:opacity-50"
                             >

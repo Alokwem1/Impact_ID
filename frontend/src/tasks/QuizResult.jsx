@@ -1,12 +1,8 @@
 import { useState, useEffect } from 'react';
+import PropTypes from 'prop-types';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-    TrophyIcon,
-    StarIcon,
-    BoltIcon,
-    SparklesIcon,
     CheckCircleIcon,
-    FireIcon,
     AcademicCapIcon,
     ChartBarIcon,
     ArrowPathIcon,
@@ -17,10 +13,10 @@ import {
     TrophyIcon as TrophyIconSolid,
     StarIcon as StarIconSolid,
     BoltIcon as BoltIconSolid,
-    SparklesIcon as SparklesIconSolid,
-    FireIcon as FireIconSolid
+    SparklesIcon as SparklesIconSolid
 } from '@heroicons/react/24/solid';
 import apiClient from '../api/axios';
+import { queryKeys } from '../api/queryKeys';
 import toast from 'react-hot-toast';
 
 // Performance level configurations
@@ -67,20 +63,52 @@ const PERFORMANCE_LEVELS = {
     }
 };
 
+// Helper function to get performance level based on percentage
+const getPerformanceLevel = (percentage) => {
+    if (percentage >= 90) return PERFORMANCE_LEVELS.excellent;
+    if (percentage >= 70) return PERFORMANCE_LEVELS.good;
+    if (percentage >= 50) return PERFORMANCE_LEVELS.fair;
+    return PERFORMANCE_LEVELS.needsWork;
+};
+
+// Helper function to get progress bar color
+const getProgressBarColor = (percentage) => {
+    if (percentage >= 90) return 'bg-green-500';
+    if (percentage >= 70) return 'bg-blue-500';
+    if (percentage >= 50) return 'bg-yellow-500';
+    return 'bg-orange-500';
+};
+
 // Simulate XP and rewards calculation (would come from backend)
 const calculateRewards = (percentage, total) => {
     const baseXP = total * 10; // 10 XP per question
-    const bonusMultiplier = percentage >= 90 ? 1.5 : percentage >= 70 ? 1.2 : 1.0;
+    
+    // Calculate bonus multiplier based on performance
+    let bonusMultiplier = 1.0;
+    if (percentage >= 90) {
+        bonusMultiplier = 1.5;
+    } else if (percentage >= 70) {
+        bonusMultiplier = 1.2;
+    }
+    
     const xpEarned = Math.round(baseXP * bonusMultiplier);
     
-    const essenceEarned = percentage >= 90 ? 5 : percentage >= 70 ? 3 : percentage >= 50 ? 1 : 0;
+    // Calculate essence earned based on performance
+    let essenceEarned = 0;
+    if (percentage >= 90) {
+        essenceEarned = 5;
+    } else if (percentage >= 70) {
+        essenceEarned = 3;
+    } else if (percentage >= 50) {
+        essenceEarned = 1;
+    }
     
     return { xpEarned, essenceEarned };
 };
 
 // Submit quiz results to backend
 const submitQuizResults = async ({ quizId, score, total, percentage }) => {
-    const { data } = await apiClient.post(`/tasks/quiz/${quizId}/complete`, {
+    const { data } = await apiClient.post(`/api/tasks/quiz/${quizId}/complete`, {
         score,
         total_questions: total,
         percentage,
@@ -138,9 +166,10 @@ export default function QuizResult({
             }
             
             // Invalidate relevant queries
-            queryClient.invalidateQueries({ queryKey: ['user_profile'] });
-            queryClient.invalidateQueries({ queryKey: ['user_badges'] });
-            queryClient.invalidateQueries({ queryKey: ['tasks'] });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
+            // badges list may depend on user id; broad root invalidation acceptable if user id not in scope
+            queryClient.invalidateQueries({ queryKey: queryKeys.badges.root() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.tasks.root() });
         },
         onError: (err) => {
             toast.error('Failed to save quiz results');
@@ -306,8 +335,8 @@ export default function QuizResult({
                                     <span>Badges Unlocked!</span>
                                 </h4>
                                 <div className="flex flex-wrap gap-2">
-                                    {rewards.badges_unlocked.map((badge, index) => (
-                                        <span key={index} className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                                    {rewards.badges_unlocked.map((badge) => (
+                                        <span key={badge} className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
                                             🏆 {badge}
                                         </span>
                                     ))}
@@ -401,11 +430,7 @@ export default function QuizResult({
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-3">
                         <div 
-                            className={`h-3 rounded-full transition-all duration-1000 ${
-                                percentage >= 90 ? 'bg-green-500' :
-                                percentage >= 70 ? 'bg-blue-500' :
-                                percentage >= 50 ? 'bg-yellow-500' : 'bg-orange-500'
-                            }`}
+                            className={`h-3 rounded-full transition-all duration-1000 ${getProgressBarColor(percentage)}`}
                             style={{ width: `${percentage}%` }}
                         ></div>
                     </div>
@@ -421,3 +446,14 @@ export default function QuizResult({
         </div>
     );
 }
+
+// PropTypes for QuizResult component
+QuizResult.propTypes = {
+    score: PropTypes.number.isRequired,
+    total: PropTypes.number.isRequired,
+    onRestart: PropTypes.func,
+    onContinue: PropTypes.func,
+    quizId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    taskTitle: PropTypes.string,
+    showActions: PropTypes.bool
+};
