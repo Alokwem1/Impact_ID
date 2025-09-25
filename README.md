@@ -176,20 +176,18 @@ The frontend is installable as a PWA. To ensure a high Lighthouse PWA score:
 - Install prompt delay currently: 3s (development) / 30s (production) after first user interaction.
 - Test offline by: building (`npm run build`), serving from a local HTTP static server, loading once, then toggling device offline.
 
-Generating Icons (two options):
-1. Script (preferred – generates all sizes + maskable):
+Generating Icons:
+The repo now uses a pure WASM SVG renderer (`@resvg/resvg-js`) – no native build/install hoops.
+Provide/modify the source SVG at `frontend/assets/images/logo-source.svg` then run:
 ```
 cd frontend
-npm install sharp --save-dev   # first time only
+npm install   # first time or after dependency changes
 npm run generate:icons
 ```
-2. Manual (example using sharp CLI):
-```
-npx sharp assets/images/logo-source.svg -resize 512 512 public/android-chrome-512x512.png
-```
-After generation: ensure `android-chrome-512x512-maskable.png` referenced with purpose `maskable`.
+This creates: 16–512 standard sizes, Apple touch icon (180), maskable 512, and a placeholder monochrome copy.
+If you add a true monochrome variant, update the manifest with `"purpose": "any monochrome"`.
 
-Preflight release check (icons + build):
+Preflight release check (icons + tests + build):
 ```
 node scripts/release-check.mjs
 ```

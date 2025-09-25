@@ -7,6 +7,7 @@ from app.utils.common import utcnow
 from enum import Enum
 from typing import List, Optional
 import re
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy import func, and_, desc
@@ -20,6 +21,7 @@ from app.database import get_db
 
 
 router = APIRouter(prefix="/badges", tags=["Badges"])
+logger = logging.getLogger("app.routers.badges")
 
 # =========================
 # 🏅 Badge Configuration
@@ -54,18 +56,14 @@ async def create_badge(
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(auth.has_role_async("admin"))
 ):
-    """Admin endpoint to create a new badge with validation.
+    logger.info("Attempting to create a badge with data: %s", badge_data)
+    logger.info("Current user: %s", current_user)
 
-    NOTE: The current `Badge` ORM model does not include fields like `category`,
-    `display_order`, or `created_by` that some higher-level design comments
-    reference. This implementation restricts persisted fields to those actually
-    present on the model to avoid runtime errors. Future migrations can extend
-    the model; this endpoint will adapt accordingly.
-    """
     # Duplicate title check
     existing_stmt = select(models.Badge).where(models.Badge.title == badge_data.title)
     existing_result = await db.execute(existing_stmt)
     if existing_result.scalars().first():
+        logger.warning("Badge creation failed: Duplicate title detected.")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A badge with this title already exists."
@@ -73,6 +71,7 @@ async def create_badge(
 
     # Criteria validation
     if not _validate_badge_criteria(badge_data.criteria):
+        logger.warning("Badge creation failed: Invalid criteria format.")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid badge criteria format. Use: 'first_submission', 'X_tasks', 'xp_X', 'streak_X', 'weave_X'"
@@ -85,6 +84,7 @@ async def create_badge(
             detail="icon_url must be a valid URL or static path."
         )
 
+    logger.info("Badge creation passed validation checks.")
     # Only pass fields that exist on the ORM model
     allowed = badge_data.model_dump()
     new_badge = models.Badge(**allowed, created_at=utcnow())
@@ -99,6 +99,7 @@ async def create_badge(
             detail="Badge creation failed due to database constraint."
     )
 
+    logger.info("Badge successfully created.")
     # Placeholder for future retroactive awarding
     background_tasks.add_task(_retroactively_award_badge, new_badge.id)
     return new_badge

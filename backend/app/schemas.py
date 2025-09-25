@@ -391,6 +391,61 @@ class PaginatedResponse(BaseModel):
     has_more: bool
 
 # ============================
+# 📊 DASHBOARD & ANALYTICS SCHEMAS
+# ============================
+
+class DashboardWeekStats(BaseModel):
+    """Nested week stats structure for dashboard."""
+    tasks_completed: int = 0
+
+class DashboardMonthStats(BaseModel):
+    """Nested month stats structure for dashboard."""
+    xp_earned: int = 0
+
+class DashboardResponse(BaseModel):
+    """Typed response for /api/dashboard endpoint.
+
+    Extra keys are allowed to avoid breaking clients if new fields are added server-side.
+    """
+    tasks_completed_today: int = 0
+    this_week_stats: DashboardWeekStats
+    this_month_stats: DashboardMonthStats
+    global_rank: int | None = None
+    daily_goals: Any | None = None
+    is_new_user: bool = False
+    model_config = ConfigDict(extra="allow")
+
+class WeavingRecentActivity(BaseModel):
+    id: int
+    username: str
+    essence_earned: int
+    category: str | None = None
+    created_at: datetime
+
+class WeavingCategoryDistributionItem(BaseModel):
+    category: str
+    count: int
+
+class WeavingLeaderboardPreviewEntry(BaseModel):
+    username: str
+    weave_count: int
+    total_essence: int
+    rank: int
+
+class WeavingAnalyticsResponse(BaseModel):
+    """Typed response for /api/weaving/analytics.
+
+    Extra allowed for forward compatibility.
+    """
+    total_threads_woven: int = 0
+    user_threads_woven: int = 0
+    total_essence_generated: int = 0
+    recent_activity: List[WeavingRecentActivity] = []
+    category_distribution: List[WeavingCategoryDistributionItem] = []
+    leaderboard_preview: List[WeavingLeaderboardPreviewEntry] = []
+    model_config = ConfigDict(extra="allow")
+
+# ============================
 # 🏅 BADGE SCHEMAS
 # ============================
 
@@ -860,18 +915,34 @@ class AdminUserReport(BaseModel):
 # ============================
 
 class LeaderboardStats(BaseModel):
-    """Comprehensive leaderboard statistics."""
-    total_participants: int
-    average_xp: float
-    top_performer_xp: int
-    xp_distribution: Dict[str, int] = Field(default_factory=dict)
-    most_active_users: List[Dict[str, Any]] = Field(default_factory=list)
-    recent_achievements: List[Dict[str, Any]] = Field(default_factory=list)
-    weekly_growth: float = 0.0
-    monthly_growth: float = 0.0
-    total_tasks_completed: int = 0
-    total_essence_earned: int = 0
-    model_config = ConfigDict(from_attributes=True)
+        """Unified leaderboard statistics model bridging current backend return shape and forward-looking analytics fields.
+
+        Notes:
+        - Frontend currently expects: total_users, active_users_today, average_xp, total_tasks_completed
+        - Existing router returns: total_users, active_users_today, top_performer, top_performer_xp, average_xp,
+            total_tasks_completed, total_essence_earned
+        - A previous (unused) schema draft defined: total_participants, xp_distribution, most_active_users, recent_achievements,
+            weekly_growth, monthly_growth
+        To avoid 500 validation errors and enable incremental enhancement, we keep all fields optional / defaulted.
+        """
+        # Currently returned & consumed fields
+        total_users: int | None = None
+        active_users_today: int | None = None
+        top_performer: str | None = None
+        top_performer_xp: int | None = None
+        average_xp: float | None = None
+        total_tasks_completed: int | None = 0
+        total_essence_earned: int | None = 0
+
+        # Extended / legacy analytics fields (safe defaults)
+        total_participants: int | None = None
+        xp_distribution: Dict[str, int] = Field(default_factory=dict)
+        most_active_users: List[Dict[str, Any]] = Field(default_factory=list)
+        recent_achievements: List[Dict[str, Any]] = Field(default_factory=list)
+        weekly_growth: float = 0.0
+        monthly_growth: float = 0.0
+
+        model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 class RecentAchievement(BaseModel):
     """Recent badge achievement."""

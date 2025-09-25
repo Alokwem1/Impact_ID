@@ -455,6 +455,11 @@ async def health_check():
             }
         )
 
+# Backward-compatible alias: /api/health -> /health
+@app.get("/api/health", tags=["Health"], include_in_schema=False)
+async def health_check_alias():
+    return await health_check()
+
 @app.get("/", include_in_schema=False)
 async def root():
     """Root endpoint with API information."""
@@ -508,6 +513,8 @@ if AUTH_ROUTER_AVAILABLE:
 
 # Include core routers
 app.include_router(users.router, prefix="/api", tags=["Users"])
+from app.routers import dashboard as dashboard_router  # local import to avoid circular during startup
+app.include_router(dashboard_router.router, prefix="/api", tags=["Dashboard"])
 app.include_router(tasks.router, prefix="/api", tags=["Tasks"])
 app.include_router(badges.router, prefix="/api", tags=["Badges"])
 app.include_router(activities.router, prefix="/api", tags=["Activities"])
@@ -723,7 +730,9 @@ async def custom_500_handler(request: Request, exc):
 # 🔧 DEVELOPMENT HELPERS
 # ================================
 
-if ENVIRONMENT == "development":
+if (ENVIRONMENT or "").lower() == "development" or DEBUG:
+
+    logger.info("🧰 Development mode detected (ENVIRONMENT=%s, DEBUG=%s) – enabling /api/dev helper endpoints", ENVIRONMENT, DEBUG)
 
     @app.get("/api/dev/info", tags=["Development"])
     async def development_info():
@@ -755,8 +764,176 @@ if ENVIRONMENT == "development":
                 })
         return {"routes": sorted(routes, key=lambda x: x['path'])}
 
+    # ==================================================
+    # 🚀 DEVELOPMENT POWER TOOLS (NOT FOR PRODUCTION)
+    # These endpoints exist ONLY while ENVIRONMENT=development.
+    # They provide shortcuts to speed up manual & automated UI testing.
+    # ==================================================
+    from fastapi import Depends
+    from pydantic import BaseModel, EmailStr
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.future import select as _select
+
+    from app.database import get_db  # Local import to keep prod surface minimal
+    from app import models, auth
+    from app.utils.security import create_access_token
+
+    class DevUserCreate(BaseModel):
+        username: str
+        email: EmailStr
+        password: str = "DevPass123!"
+        make_admin: bool = False
+        verified: bool = True
+        role: str | None = None
+
+    @app.post("/api/dev/create-user", tags=["Development"], summary="Create & optionally auto-verify a user (dev only)")
+    async def dev_create_user(payload: DevUserCreate, db: AsyncSession = Depends(get_db)):
+        # Uniqueness check
+        stmt = _select(models.User).where((models.User.username == payload.username.lower()) | (models.User.email == payload.email.lower()))
+        res = await db.execute(stmt)
+        existing = res.scalars().first()
+        if existing:
+            return JSONResponse(status_code=409, content={"detail": "User with username or email already exists", "id": existing.id})
+
+        user = models.User(
+            username=payload.username.lower(),
+            email=payload.email.lower(),
+            hashed_password=auth.hash_password(payload.password),
+            role="admin" if payload.make_admin else (payload.role or "user"),
+            status="active",
+            email_verified=payload.verified,
+            created_at=utcnow(),
+            xp=0,
+            level=1,
+            essence_balance=0,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+        token_data = {"sub": str(user.id), "username": user.username, "email": user.email, "role": user.role}
+        access_token = create_access_token(data=token_data)
+
+        return {
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "role": user.role,
+                "email_verified": user.email_verified,
+            },
+            "access_token": access_token,
+            "note": "Dev helper – do NOT expose in production"
+        }
+
+    class DevPromotePayload(BaseModel):
+        username: str
+        role: str = "admin"
+
+    @app.post("/api/dev/promote", tags=["Development"], summary="Promote a user to a role (dev only)")
+    async def dev_promote_user(payload: DevPromotePayload, db: AsyncSession = Depends(get_db)):
+        stmt = _select(models.User).where(models.User.username == payload.username.lower())
+        res = await db.execute(stmt)
+        user = res.scalars().first()
+        if not user:
+            return JSONResponse(status_code=404, content={"detail": "User not found"})
+        user.role = payload.role
+        await db.commit()
+        return {"message": "Role updated", "username": user.username, "role": user.role}
+
+    @app.post("/api/dev/seed", tags=["Development"], summary="Run database seeder (dev only)")
+    async def dev_seed(include_sample_data: bool = True):
+        try:
+            from app.seed import DatabaseSeeder
+            result = await DatabaseSeeder().seed_all(include_sample_data=include_sample_data)
+            return {"seed_result": result, "note": "Dev seeding complete"}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": "Seeding failed", "error": str(e)})
+
 # ================================
 # 📝 COMPATIBILITY EVENT HANDLERS
 # ================================
 
 # Removed deprecated @app.on_event('startup') handler; initialization handled in lifespan.
+
+# ================================
+# 🧰 DEV HELPERS (FALLBACK REGISTRATION)
+# ================================
+
+# In some environments (e.g., when started via certain wrappers), the conditional
+# dev block above may not execute as expected. To ensure productivity in dev,
+# register minimal helper endpoints here but gate them at runtime.
+try:
+    from fastapi import Depends
+    from pydantic import BaseModel, EmailStr
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.future import select as _select
+    from app.database import get_db
+    from app import models as _models, auth as _auth
+    from app.utils.security import create_access_token as _create_access_token
+
+    def _is_dev_mode() -> bool:
+        return ((ENVIRONMENT or "").lower() == "development") or bool(DEBUG)
+
+    @app.get("/api/dev/info", tags=["Development"], include_in_schema=False)
+    async def dev_info_fallback():
+        if not _is_dev_mode():
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        return {
+            "environment": ENVIRONMENT,
+            "debug": DEBUG,
+            "version": VERSION,
+            "note": "Fallback dev info endpoint active",
+        }
+
+    class _DevUserCreate(BaseModel):
+        username: str
+        email: EmailStr
+        password: str = "DevPass123!"
+        make_admin: bool = False
+        verified: bool = True
+        role: str | None = None
+
+    @app.post("/api/dev/create-user", tags=["Development"], include_in_schema=False)
+    async def dev_create_user_fallback(payload: _DevUserCreate, db: AsyncSession = Depends(get_db)):
+        if not _is_dev_mode():
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        # Uniqueness check
+        stmt = _select(_models.User).where((_models.User.username == payload.username.lower()) | (_models.User.email == payload.email.lower()))
+        res = await db.execute(stmt)
+        existing = res.scalars().first()
+        if existing:
+            return JSONResponse(status_code=409, content={"detail": "User with username or email already exists", "id": existing.id})
+
+        user = _models.User(
+            username=payload.username.lower(),
+            email=payload.email.lower(),
+            hashed_password=_auth.hash_password(payload.password),
+            role="admin" if payload.make_admin else (payload.role or "user"),
+            status="active",
+            email_verified=payload.verified,
+            created_at=utcnow(),
+            xp=0,
+            level=1,
+            essence_balance=0,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+        token_data = {"sub": str(user.id), "username": user.username, "email": user.email, "role": user.role}
+        access_token = _create_access_token(data=token_data)
+        return {
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "role": user.role,
+                "email_verified": user.email_verified,
+            },
+            "access_token": access_token,
+            "note": "Dev helper – fallback registration",
+        }
+except Exception:
+    # Do not break app startup if optional dev helpers fail to import
+    logger.warning("Dev helper fallback registration skipped due to import error", exc_info=True)

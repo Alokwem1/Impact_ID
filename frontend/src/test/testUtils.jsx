@@ -1,18 +1,23 @@
-import React from 'react';
-import { MemoryRouter } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render } from '@testing-library/react';
-import { ThemeProvider } from '../ThemeContext';
-import { AuthProvider } from '../utils/AuthContext';
-import { WebSocketStatusProvider } from '../WebSocketStatusContext';
+import React from "react";
+import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render } from "@testing-library/react";
+import { ThemeProvider } from "../ThemeContext";
+import { AuthProvider } from "../utils/AuthContext";
+import { WebSocketStatusProvider } from "../WebSocketStatusContext";
 
 // Central render wrapper to ensure provider composition consistency across tests
-export function renderWithProviders(ui, { route = '/', queryClient, includeAuth = true, ...renderOptions } = {}) {
-  const qc = queryClient || new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-    },
-  });
+export function renderWithProviders(
+  ui,
+  { route = "/", queryClient, includeAuth = true, ...renderOptions } = {},
+) {
+  const qc =
+    queryClient ||
+    new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
 
   function Wrapper({ children }) {
     return (
@@ -20,13 +25,7 @@ export function renderWithProviders(ui, { route = '/', queryClient, includeAuth 
         <QueryClientProvider client={qc}>
           <ThemeProvider>
             <WebSocketStatusProvider>
-              {includeAuth ? (
-                <AuthProvider>
-                  {children}
-                </AuthProvider>
-              ) : (
-                children
-              )}
+              {includeAuth ? <AuthProvider>{children}</AuthProvider> : children}
             </WebSocketStatusProvider>
           </ThemeProvider>
         </QueryClientProvider>
@@ -37,4 +36,4 @@ export function renderWithProviders(ui, { route = '/', queryClient, includeAuth 
   return { qc, ...render(ui, { wrapper: Wrapper, ...renderOptions }) };
 }
 
-export * from '@testing-library/react';
+export * from "@testing-library/react";

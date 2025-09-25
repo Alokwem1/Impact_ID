@@ -430,3 +430,105 @@ def _check_weaving_achievements(user_id: int, daily_weaves: int):
     # - 7-day streak
     # - 100 total weaves
     pass
+
+# =========================
+# 📈 Analytics Endpoint (Used by Frontend WeavingLoomPage)
+# =========================
+
+@router.get("/analytics", response_model=schemas.WeavingAnalyticsResponse)
+async def get_weaving_analytics(
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user_async)
+):
+    """Return lightweight weaving analytics consumed by the frontend.
+
+    Provides:
+      total_threads_woven: Total woven threads (all users)
+      user_threads_woven: Threads woven by current user
+      total_essence_generated: Sum of essence_earned in WeaveSubmission
+      recent_activity: Last 5 weave submissions (username, essence)
+      category_distribution: [{category, count}]
+      leaderboard_preview: Top 5 by weave_count
+    """
+    try:
+        # Total woven threads (threads whose status == 'woven')
+        total_woven_stmt = select(func.count(models.ImpactThread.id)).where(models.ImpactThread.status == 'woven')
+        total_woven = (await db.execute(total_woven_stmt)).scalar() or 0
+
+        # User woven count (from WeaveSubmission)
+        user_woven_stmt = select(func.count(models.WeaveSubmission.id)).where(models.WeaveSubmission.user_id == current_user.id)
+        user_woven = (await db.execute(user_woven_stmt)).scalar() or 0
+
+        # Total essence generated
+        total_essence_stmt = select(func.sum(models.WeaveSubmission.essence_earned))
+        total_essence = (await db.execute(total_essence_stmt)).scalar() or 0
+
+        # Recent activity (last 5 submissions)
+        recent_stmt = (
+            select(
+                models.WeaveSubmission.id,
+                models.WeaveSubmission.created_at,
+                models.WeaveSubmission.essence_earned,
+                models.User.username,
+                models.WeaveSubmission.category,
+            )
+            .join(models.User, models.WeaveSubmission.user_id == models.User.id)
+            .order_by(models.WeaveSubmission.created_at.desc())
+            .limit(5)
+        )
+        recent_rows = (await db.execute(recent_stmt)).all()
+        recent_activity = [
+            schemas.WeavingRecentActivity(
+                id=r.id,
+                username=r.username,
+                essence_earned=r.essence_earned or 0,
+                category=r.category,
+                created_at=r.created_at,
+            )
+            for r in recent_rows
+        ]
+
+        # Category distribution
+        category_stmt = select(
+            models.WeaveSubmission.category,
+            func.count(models.WeaveSubmission.id)
+        ).group_by(models.WeaveSubmission.category)
+        category_rows = (await db.execute(category_stmt)).all()
+        category_distribution = [
+            schemas.WeavingCategoryDistributionItem(category=row[0] or "Unknown", count=row[1]) for row in category_rows
+        ]
+
+        # Leaderboard preview (top 5 by weave_count)
+        leaderboard_stmt = (
+            select(
+                models.User.username,
+                func.count(models.WeaveSubmission.id).label('weave_count'),
+                func.sum(models.WeaveSubmission.essence_earned).label('total_essence'),
+            )
+            .join(models.WeaveSubmission, models.User.id == models.WeaveSubmission.user_id)
+            .group_by(models.User.id, models.User.username)
+            .order_by(func.count(models.WeaveSubmission.id).desc())
+            .limit(5)
+        )
+        leaderboard_rows = (await db.execute(leaderboard_stmt)).all()
+        leaderboard_preview = [
+            schemas.WeavingLeaderboardPreviewEntry(
+                username=row.username,
+                weave_count=row.weave_count,
+                total_essence=row.total_essence or 0,
+                rank=idx + 1,
+            )
+            for idx, row in enumerate(leaderboard_rows)
+        ]
+
+        return schemas.WeavingAnalyticsResponse(
+            total_threads_woven=total_woven,
+            user_threads_woven=user_woven,
+            total_essence_generated=total_essence,
+            recent_activity=recent_activity,
+            category_distribution=category_distribution,
+            leaderboard_preview=leaderboard_preview,
+        )
+    except Exception as e:
+        # Fail soft – frontend treats null / absence gracefully
+        raise HTTPException(status_code=500, detail="Failed to compute weaving analytics") from e

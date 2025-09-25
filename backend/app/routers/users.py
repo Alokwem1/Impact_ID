@@ -6,6 +6,7 @@ Users module for Impact ID application.
 from datetime import datetime, timedelta
 from typing import Optional
 import logging
+import os
 import uuid
 
 from eth_account.messages import encode_defunct
@@ -87,7 +88,21 @@ async def signup(
         await db.refresh(new_user)
 
         # Send verification email
-        verification_url = f"{request.base_url.replace(path='/')}users/verify-email?token={verification_token}"
+        # Build a frontend URL so users land on the SPA page that handles verification,
+        # which then calls the backend API /api/users/verify-email under the hood.
+        # Prefer FRONTEND_BASE_URL if provided; otherwise fall back to localhost:5173 in dev,
+        # and to backend base URL (same host) as a last resort.
+        def _frontend_base(req: Request) -> str:
+            fe = os.getenv("FRONTEND_BASE_URL", "").strip()
+            if fe:
+                return fe.rstrip('/') + '/'
+            env = os.getenv("ENVIRONMENT", "development").lower()
+            if env == "development":
+                return "http://localhost:5173/"
+            # Fallback to same host root (may be behind a reverse proxy in prod)
+            return str(req.base_url.replace(path='/'))
+
+        verification_url = f"{_frontend_base(request)}verify-email?token={verification_token}"
         background_tasks.add_task(
             send_email,
             to=new_user.email,
@@ -126,6 +141,70 @@ async def signup(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Registration service temporarily unavailable."
     )
+
+# =========================
+# 🧰 Development helper: create user quickly (dev only)
+# =========================
+from pydantic import BaseModel, EmailStr
+
+class DevUserCreate(BaseModel):
+    username: str
+    email: EmailStr
+    password: str = "DevPass123!"
+    make_admin: bool = False
+    verified: bool = True
+    role: Optional[str] = None
+
+@router.post("/dev/create-user", tags=["Development"], include_in_schema=False)
+async def dev_create_user(
+    payload: DevUserCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    debug = os.getenv("DEBUG", "true").lower() == "true"
+    if not (env == "development" or debug):
+        # Hide in non-dev
+        raise HTTPException(status_code=404, detail="API endpoint not found")
+
+    # Check existing
+    stmt = select(models.User).where(
+        (models.User.username == payload.username.lower()) |
+        (models.User.email == payload.email.lower())
+    )
+    res = await db.execute(stmt)
+    existing = res.scalars().first()
+    if existing:
+        return {"detail": "User already exists", "id": existing.id}
+
+    user = models.User(
+        username=payload.username.lower(),
+        email=payload.email.lower(),
+        hashed_password=auth.hash_password(payload.password),
+        role="admin" if payload.make_admin else (payload.role or "user"),
+        status="active",
+        email_verified=payload.verified,
+        created_at=utcnow(),
+        xp=0,
+        level=1,
+        essence_balance=0,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    token_data = {"sub": str(user.id), "username": user.username, "email": user.email, "role": user.role}
+    access_token = create_access_token(data=token_data)
+    return {
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "email_verified": user.email_verified,
+        },
+        "access_token": access_token,
+        "note": "Dev helper – /api/users/dev-create"
+    }
 
 @router.post("/login", response_model=schemas.Token)
 async def login(
@@ -728,7 +807,6 @@ async def change_password(
         logger.info("Password changed for user: %s", current_user.username)
 
         return {"message": "Password changed successfully"}
-
     except HTTPException as e:
         raise
     except Exception as e:
@@ -738,6 +816,47 @@ async def change_password(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Password change service temporarily unavailable"
     )
+
+# =========================
+# 🏆 Recent Achievements (Dashboard)
+# =========================
+
+@router.get("/achievements/recent")
+async def get_recent_achievements(
+    limit: int = 3,
+    current_user: models.User = Depends(auth.get_current_user_async),
+    db: AsyncSession = Depends(get_db)
+):
+    """Return the user's most recent earned badges (achievements) for dashboard display.
+
+    Shape aligns with frontend expectations: list of objects containing
+      badge_title / title, awarded_at, xp_reward (optional), description.
+    """
+    try:
+        limit = max(1, min(limit, 10))
+        stmt = (
+            select(models.UserBadge, models.Badge)
+            .join(models.Badge, models.UserBadge.badge_id == models.Badge.id)
+            .where(models.UserBadge.user_id == current_user.id)
+            .order_by(models.UserBadge.awarded_at.desc())
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+        achievements = [
+            {
+                "badge_title": badge.title,
+                "title": badge.title,
+                "badge_description": badge.description,
+                "awarded_at": user_badge.awarded_at,
+                "xp_reward": getattr(badge, 'xp_reward', None),
+                "badge_icon": getattr(badge, 'icon', None)
+            }
+            for user_badge, badge in rows
+        ]
+        return achievements
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to fetch recent achievements") from e
 
 # =========================
 # 🔗 Account Linking
@@ -971,9 +1090,17 @@ async def resend_verification_email(
         current_user.verification_token = verification_token
         await db.commit()
 
-        # Send verification email
-        base_url = request.base_url.replace(path='/') if request else "http://localhost:8000/"
-        verification_url = f"{base_url}users/verify-email?token={verification_token}"
+        # Send verification email using the same frontend URL strategy as in signup
+        def _frontend_base(req: Request) -> str:
+            fe = os.getenv("FRONTEND_BASE_URL", "").strip()
+            if fe:
+                return fe.rstrip('/') + '/'
+            env = os.getenv("ENVIRONMENT", "development").lower()
+            if env == "development":
+                return "http://localhost:5173/"
+            return str(req.base_url.replace(path='/')) if req else "http://localhost/"
+
+        verification_url = f"{_frontend_base(request)}verify-email?token={verification_token}"
 
         background_tasks.add_task(
             send_email,

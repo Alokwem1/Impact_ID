@@ -11,8 +11,8 @@ export default defineConfig([
       "public/**",
       "vite.config.js",
       "tailwind.config.js",
-      "src/**/*.test.{js,jsx,ts,tsx}"
-    ]
+      "src/**/*.test.{js,jsx,ts,tsx}",
+    ],
   },
   // Base JS/React rules
   js.configs.recommended,
@@ -28,10 +28,10 @@ export default defineConfig([
         __BUILD_TIME__: "readonly",
         __DEV__: "readonly",
         __PROD__: "readonly",
-      }
+      },
     },
     settings: {
-      react: { version: "detect" }
+      react: { version: "detect" },
     },
     rules: {
       // Keep JSX runtime flexible under Vite/React 18
@@ -40,7 +40,7 @@ export default defineConfig([
       "react/prop-types": "off",
       "react/no-unescaped-entities": "off",
       "react/jsx-no-undef": "off",
-      "no-unused-vars": "off"
-    }
-  }
+      "no-unused-vars": "off",
+    },
+  },
 ]);

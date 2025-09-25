@@ -30,9 +30,14 @@ class AuthEventEmitter {
 
   emit(event, payload) {
     const set = this.listeners.get(event);
-    if (set) [...set].forEach(fn => {
-      try { fn(payload); } catch (e) { if (import.meta.env.DEV) console.warn('AuthEvent listener error', e); }
-    });
+    if (set)
+      [...set].forEach((fn) => {
+        try {
+          fn(payload);
+        } catch (e) {
+          if (import.meta.env.DEV) console.warn("AuthEvent listener error", e);
+        }
+      });
   }
 }
 
@@ -40,9 +45,9 @@ export const authEvents = new AuthEventEmitter();
 
 // Event name constants (helps avoid typos)
 export const AUTH_EVENT = {
-  LOGIN: 'login',
-  LOGOUT: 'logout',
-  TOKEN_REFRESH: 'token_refresh',
-  TOKEN_REFRESH_FAILED: 'token_refresh_failed',
-  SESSION_EXPIRED: 'session_expired'
+  LOGIN: "login",
+  LOGOUT: "logout",
+  TOKEN_REFRESH: "token_refresh",
+  TOKEN_REFRESH_FAILED: "token_refresh_failed",
+  SESSION_EXPIRED: "session_expired",
 };

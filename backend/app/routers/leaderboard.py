@@ -4,6 +4,7 @@ Leaderboard module for Impact ID application.
 
 
 from datetime import datetime, timedelta, timezone
+import time
 from enum import Enum
 from typing import List, Optional
 
@@ -18,6 +19,22 @@ from app.database import get_db
 
 
 router = APIRouter(prefix="/leaderboard", tags=["Leaderboard"])
+
+_CACHE: dict[str, tuple[float, dict]] = {}
+_STATS_TTL_SECONDS = 60  # cache expensive aggregate for 1 minute
+
+def _cache_get(key: str):
+    rec = _CACHE.get(key)
+    if not rec:
+        return None
+    ts, payload = rec
+    if time.time() - ts > _STATS_TTL_SECONDS:
+        _CACHE.pop(key, None)
+        return None
+    return payload
+
+def _cache_set(key: str, payload: dict):
+    _CACHE[key] = (time.time(), payload)
 def _utcnow() -> datetime:
     """Return naive UTC datetime without using deprecated utcnow()."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -132,11 +149,13 @@ async def get_my_position(
             detail="User not found in leaderboard"
         )
 
+    total_users = await _get_total_users_count(db)
     return schemas.UserLeaderboardPosition(
         leaderboard_type=leaderboard_type,
         period=period,
         position=position,
-        total_users=await _get_total_users_count(db)
+        total_users=total_users,
+        percentile=_compute_percentile(position, total_users)
     )
 
 @router.get("/stats", response_model=schemas.LeaderboardStats)
@@ -146,6 +165,10 @@ async def get_leaderboard_stats(
     """
     📈 Gets comprehensive leaderboard statistics and platform metrics.
     """
+    cache_key = "leaderboard:stats"
+    cached = _cache_get(cache_key)
+    if cached:
+        return schemas.LeaderboardStats(**cached)
     now = _utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     # week_ago retained only if needed in future analytics; remove to avoid unused variable
@@ -177,15 +200,17 @@ async def get_leaderboard_stats(
     avg_xp_result = await db.execute(avg_xp_stmt)
     avg_xp = avg_xp_result.scalar() or 0
 
-    return schemas.LeaderboardStats(
+    payload = dict(
         total_users=total_users,
         active_users_today=active_today,
         top_performer=top_performer.username if top_performer else None,
         top_performer_xp=top_performer.xp if top_performer else 0,
         average_xp=round(float(avg_xp), 2),
         total_tasks_completed=await _get_total_tasks_completed(db),
-        total_essence_earned=await _get_total_essence_earned(db)
+        total_essence_earned=await _get_total_essence_earned(db),
     )
+    _cache_set(cache_key, payload)
+    return schemas.LeaderboardStats(**payload)
 
 @router.get("/recent-achievements", response_model=List[schemas.RecentAchievement])
 async def get_recent_achievements(
@@ -614,3 +639,13 @@ async def _get_total_essence_earned(db: AsyncSession) -> int:
     stmt = select(func.sum(models.User.essence_balance))
     result = await db.execute(stmt)
     return int(result.scalar() or 0)
+
+def _compute_percentile(position: int, total: int) -> float | None:
+    """Compute user percentile (0 = best, 100 = worst) given rank position.
+
+    Returns None if inputs are invalid.
+    Formula: ((position - 1) / total) * 100
+    """
+    if not total or position <= 0 or position > total:
+        return None
+    return round(((position - 1) / total) * 100, 2)

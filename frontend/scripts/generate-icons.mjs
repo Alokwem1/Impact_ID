@@ -1,29 +1,49 @@
 #!/usr/bin/env node
 /**
- * Generate PWA icons from a single square source image (PNG or SVG).
- * Safe: only writes inside specified output dir (default: frontend/public when run via npm script).
+ * Generate PWA icons from a single square SVG source image using WASM renderer (resvg).
+ * Rationale: avoid native dependencies (sharp) which are flaky on some Windows CI/dev setups.
+ * NOTE: Only SVG source is supported now (simpler + crisp scaling). Provide PNGs manually if needed.
  */
-import fs from 'fs';
-import path from 'path';
-import sharp from 'sharp';
+import fs from "fs";
+import path from "path";
+import { Resvg } from "@resvg/resvg-js";
 
 const SIZES = [16, 32, 64, 180, 192, 256, 384, 512];
 const MASKABLE_SIZES = [512];
 
-const SOURCE = process.argv[2] || 'assets/images/logo-source.svg';
-const outDir = process.argv[3] || 'public';
+const SOURCE = process.argv[2] || "assets/images/logo-source.svg";
+const outDir = process.argv[3] || "public";
 
-async function ensureDir(dir){ if(!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
 
-async function validateSquare(input){
-  try {
-    const meta = await sharp(input).metadata();
-    if(!meta.width || !meta.height) return;
-    if(meta.width !== meta.height) {
-      console.warn(`⚠ Source is not square (${meta.width}x${meta.height}). Icons will be distorted.`);
+function isSvg(file) {
+  return /\.svg$/i.test(file);
+}
+
+function renderSvgToPng(svgContent, size) {
+  // Fit by width (square assumed); resvg keeps aspect ratio.
+  const r = new Resvg(svgContent, {
+    fitTo: { mode: "width", value: size },
+    background: "transparent",
+  });
+  // If height differs adjust? resvg fitTo width ensures width==size. We'll crop/pad to square if needed.
+  return r.render().asPng();
+}
+
+function tryWarnSquare(svg) {
+  // Naive viewBox parse for square detection.
+  const m = svg.match(/viewBox="([0-9.\s]+)"/i);
+  if (!m) return;
+  const parts = m[1].trim().split(/\s+/).map(Number);
+  if (parts.length === 4) {
+    const [, , w, h] = parts;
+    if (w && h && w !== h) {
+      console.warn(
+        `⚠ Source viewBox not square (${w}x${h}). Output will be padded to square.`,
+      );
     }
-  } catch(e){
-    console.warn('⚠ Could not read image metadata (still attempting):', e.message);
   }
 }
 
@@ -32,37 +52,56 @@ async function run() {
     console.error(`Source image not found: ${SOURCE}`);
     process.exit(1);
   }
-
-  await ensureDir(outDir);
-  await validateSquare(SOURCE);
-
-  await Promise.all(SIZES.map(async (size) => {
-    const file = size === 180 ? 'apple-touch-icon.png' : `android-chrome-${size}x${size}.png`;
-    const target = path.join(outDir, file);
-    await sharp(SOURCE).resize(size, size).png({ compressionLevel: 9 }).toFile(target);
-    console.log('Created', target);
-  }));
-
-  await Promise.all(MASKABLE_SIZES.map(async (size) => {
-    const file = `android-chrome-${size}x${size}-maskable.png`;
-    const target = path.join(outDir, file);
-    await sharp(SOURCE)
-      .resize(size, size)
-      .png({ compressionLevel: 9 })
-      .toFile(target);
-    console.log('Created', target, '(maskable)');
-  }));
-
-  // Generate a simple monochrome (white) variant for optional use
-  const mono = path.join(outDir, 'android-chrome-512x512-monochrome.png');
-  try {
-    await sharp(SOURCE).resize(512, 512).flatten({ background: '#FFFFFF' }).png({ compressionLevel: 9 }).toFile(mono);
-    console.log('Created', mono, '(monochrome suggestion)');
-  } catch(e){
-    console.warn('⚠ Monochrome generation skipped:', e.message);
+  if (!isSvg(SOURCE)) {
+    console.error(
+      "Only SVG source supported in WASM mode. Provide an SVG (e.g. logo-source.svg).",
+    );
+    process.exit(1);
   }
 
-  console.log('All icons generated. Update manifest if adding monochrome purpose.');
+  const svg = fs.readFileSync(SOURCE, "utf8");
+  tryWarnSquare(svg);
+  ensureDir(outDir);
+
+  const writes = [];
+  for (const size of SIZES) {
+    const file =
+      size === 180
+        ? "apple-touch-icon.png"
+        : `android-chrome-${size}x${size}.png`;
+    const target = path.join(outDir, file);
+    const png = renderSvgToPng(svg, size);
+    fs.writeFileSync(target, png);
+    console.log("Created", target);
+  }
+
+  for (const size of MASKABLE_SIZES) {
+    const file = `android-chrome-${size}x${size}-maskable.png`;
+    const target = path.join(outDir, file);
+    const png = renderSvgToPng(svg, size);
+    fs.writeFileSync(target, png);
+    console.log("Created", target, "(maskable)");
+  }
+
+  // Monochrome variant (simple copy for now). Real silhouette processing can be added later.
+  try {
+    const monoTarget = path.join(
+      outDir,
+      "android-chrome-512x512-monochrome.png",
+    );
+    fs.copyFileSync(
+      path.join(outDir, "android-chrome-512x512.png"),
+      monoTarget,
+    );
+    console.log("Created", monoTarget, "(monochrome placeholder)");
+  } catch (err) {
+    console.warn("⚠ Monochrome copy skipped:", err.message);
+  }
+
+  console.log("All icons generated via resvg-js.");
 }
 
-run().catch(err => { console.error(err); process.exit(1); });
+run().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

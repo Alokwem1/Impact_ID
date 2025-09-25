@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { authEvents, AUTH_EVENT } from '../utils/authEvents';
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { authEvents, AUTH_EVENT } from "../utils/authEvents";
 
 // Helper to fully reset internal emitter state between tests
 afterEach(() => {
@@ -10,8 +10,8 @@ afterEach(() => {
   }
 });
 
-describe('authEvents emitter', () => {
-  it('on + emit deliver payload to multiple listeners', () => {
+describe("authEvents emitter", () => {
+  it("on + emit deliver payload to multiple listeners", () => {
     const a = vi.fn();
     const b = vi.fn();
     const payload = { user: { id: 1 } };
@@ -26,7 +26,7 @@ describe('authEvents emitter', () => {
     expect(b).toHaveBeenCalledWith(payload);
   });
 
-  it('off removes specific listener and leaves others intact', () => {
+  it("off removes specific listener and leaves others intact", () => {
     const a = vi.fn();
     const b = vi.fn();
     const offA = authEvents.on(AUTH_EVENT.LOGOUT, a);
@@ -43,7 +43,7 @@ describe('authEvents emitter', () => {
     expect(b).toHaveBeenCalledTimes(2); // still receives
   });
 
-  it('once only fires a single time then auto-unsubscribes', () => {
+  it("once only fires a single time then auto-unsubscribes", () => {
     const fn = vi.fn();
     authEvents.once(AUTH_EVENT.TOKEN_REFRESH, fn);
 
@@ -54,9 +54,11 @@ describe('authEvents emitter', () => {
     expect(fn).toHaveBeenCalledWith({ attempt: 1 });
   });
 
-  it('listener throwing error does not prevent others from running', () => {
-    const err = new Error('boom');
-    const throwing = vi.fn(() => { throw err; });
+  it("listener throwing error does not prevent others from running", () => {
+    const err = new Error("boom");
+    const throwing = vi.fn(() => {
+      throw err;
+    });
     const ok = vi.fn();
 
     // Optionally silence console for this test if DEV mode logs
@@ -66,7 +68,7 @@ describe('authEvents emitter', () => {
     authEvents.on(AUTH_EVENT.SESSION_EXPIRED, throwing);
     authEvents.on(AUTH_EVENT.SESSION_EXPIRED, ok);
 
-    authEvents.emit(AUTH_EVENT.SESSION_EXPIRED, { reason: 'timeout' });
+    authEvents.emit(AUTH_EVENT.SESSION_EXPIRED, { reason: "timeout" });
 
     expect(throwing).toHaveBeenCalledTimes(1);
     expect(ok).toHaveBeenCalledTimes(1);
@@ -74,7 +76,7 @@ describe('authEvents emitter', () => {
     console.warn = originalWarn; // restore
   });
 
-  it('removing last listener cleans internal map', () => {
+  it("removing last listener cleans internal map", () => {
     const fn1 = vi.fn();
     const fn2 = vi.fn();
     const off1 = authEvents.on(AUTH_EVENT.LOGIN, fn1);

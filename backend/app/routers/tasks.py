@@ -22,6 +22,14 @@ from app.utils.common import utcnow, ErrorMessages
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
+# Helper to normalize task type checks (handles Enum instances and string forms like 'TaskType.QUIZ')
+def _is_quiz_type(t: Any) -> bool:
+    try:
+        s = str(getattr(t, "value", t)).lower()
+    except Exception:
+        s = str(t).lower()
+    return "quiz" in s
+
 # ========================
 # 🛠️ Admin: Task Management
 # ========================
@@ -38,7 +46,7 @@ async def create_task(
     """
     try:
         # Enhanced validation
-        if task_data.type == "quiz":
+        if _is_quiz_type(task_data.type):
             if not task_data.correct_answer:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -63,10 +71,14 @@ async def create_task(
             )
 
         # ✅ CRITICAL FIX: Use correct field names from models
+        # Normalize enums to their string values for storage
+        _type_value = getattr(task_data.type, "value", task_data.type)
+        _difficulty_value = getattr(task_data.difficulty, "value", task_data.difficulty)
+
         new_task = models.Task(
             title=task_data.title,
-            type=task_data.type,
-            difficulty=task_data.difficulty,
+            type=str(_type_value),
+            difficulty=str(_difficulty_value),
             instructions=task_data.instructions,
             category=task_data.category,
             tags=task_data.tags,
@@ -137,8 +149,14 @@ async def update_task(
         # Validate updates
         update_data = task_data.model_dump(exclude_unset=True)
 
+        # Normalize any enum values to strings for storage
+        if 'type' in update_data:
+            update_data['type'] = str(getattr(update_data['type'], 'value', update_data['type']))
+        if 'difficulty' in update_data:
+            update_data['difficulty'] = str(getattr(update_data['difficulty'], 'value', update_data['difficulty']))
+
         # Special validation for quiz updates
-        if update_data.get("type") == 'quiz' or task.type == 'quiz':
+        if (_is_quiz_type(update_data.get("type")) if 'type' in update_data else _is_quiz_type(task.type)):
             if 'quiz_question' in update_data and not update_data['quiz_question']:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -310,6 +328,7 @@ async def review_submission(
 # ========================
 
 @router.get("/", response_model=schemas.PaginatedResponse)
+@router.get("", response_model=schemas.PaginatedResponse)
 async def get_task_feed(
     category: Optional[str] = Query(None, description="Filter by category"),
     difficulty: Optional[str] = Query(None, description="Filter by difficulty level"),
@@ -599,7 +618,7 @@ def _determine_submission_status(task: models.Task, submission: schemas.TaskSubm
     auto_approved = False
     score = None
 
-    if task.type == "quiz" and task.correct_answer:
+    if _is_quiz_type(task.type) and task.correct_answer:
         is_correct = submission.response.strip().lower() == task.correct_answer.strip().lower()
         submission_status = "approved" if is_correct else "rejected"
         auto_approved = is_correct
@@ -707,11 +726,19 @@ async def submit_task(
             )
 
         # Enhanced validation
-        if not submission.response or len(submission.response.strip()) < 5:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Response must be at least 5 characters long"
-            )
+        # Relax minimum length for quizzes to allow short correct answers like "4"
+        min_len = 1 if _is_quiz_type(task.type) else 5
+        if not submission.response or len(submission.response.strip()) < min_len:
+            if _is_quiz_type(task.type):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Response must not be empty for quiz submissions"
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Response must be at least 5 characters long"
+                )
 
         # Check time limit if specified
         if task.time_limit_minutes and submission.time_spent_minutes:
@@ -726,7 +753,7 @@ async def submit_task(
         auto_approved = False
         score = None
 
-        if task.type == "quiz" and task.correct_answer:
+        if _is_quiz_type(task.type) and task.correct_answer:
             # Auto-grade quiz submissions
             is_correct = submission.response.strip().lower() == task.correct_answer.strip().lower()
             submission_status = "approved" if is_correct else "rejected"
@@ -787,12 +814,16 @@ async def submit_task(
         )
 
         # Prepare response
+        # Tailor message based on outcome for better UX
+        default_message = "Correct! XP and points awarded." if auto_approved else (
+            "Incorrect answer. Please try again." if submission_status == "rejected" else "Submission received and is pending review."
+        )
         response_data = schemas.TaskSubmissionResponse(
             submission_id=new_submission.id,
             status=submission_status,
             submitted_at=new_submission.submitted_at,
             auto_approved=auto_approved,
-            message=("Correct! XP and points awarded." if auto_approved else "Submission received and is pending review.")
+            message=default_message
         )
 
         if auto_approved:
@@ -802,7 +833,8 @@ async def submit_task(
             response_data.new_xp_total = current_user.xp
             response_data.new_essence_total = current_user.essence_balance
         else:
-            response_data.message = "Submission received and is pending review."
+            # Keep message set above (either incorrect answer or pending review)
+            pass
 
         return response_data
 

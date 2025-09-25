@@ -1,0 +1,22 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "backend:dev",
+			"type": "shell",
+			"command": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\backend\\run_dev.ps1",
+			"isBackground": true,
+			"problemMatcher": [
+				"$eslint-stylish"
+			],
+			"group": "build"
+		},
+		{
+			"label": "backend:dev",
+			"type": "shell",
+			"command": ".\\backend\\run_dev.ps1",
+			"isBackground": true,
+			"group": "build"
+		}
+	]
+}

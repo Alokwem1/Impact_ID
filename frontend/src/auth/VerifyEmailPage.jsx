@@ -1,355 +1,262 @@
-import { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom';
-import { 
-    CheckCircleIcon,
-    ExclamationTriangleIcon,
-    InformationCircleIcon,
-    EnvelopeIcon,
-    SparklesIcon,
-    ArrowRightIcon,
-    ClockIcon,
-    XCircleIcon
-} from '@heroicons/react/24/outline';
-import apiClient from '../api/axios';
-import toast from 'react-hot-toast';
+import { useState, useEffect } from "react";
+import { useSearchParams, useNavigate, Link } from "react-router-dom";
+import {
+  CheckCircleIcon,
+  InformationCircleIcon,
+  EnvelopeIcon,
+  ArrowRightIcon,
+  ClockIcon,
+  XCircleIcon,
+} from "@heroicons/react/24/outline";
+import apiClient from "../api/axios";
+import toast from "react-hot-toast";
+import AuthLayout from "./AuthLayout";
 
+// Compact, unified email verification screen using AuthLayout
 export default function VerifyEmailPage() {
-    const [status, setStatus] = useState({ 
-        message: 'Verifying your email address...', 
-        type: 'loading' 
-    });
-    const [resendLoading, setResendLoading] = useState(false);
-    const [resendCooldown, setResendCooldown] = useState(0);
-    const [userEmail, setUserEmail] = useState('');
-    const [searchParams] = useSearchParams();
-    const navigate = useNavigate();
+  const [status, setStatus] = useState({
+    message: "Verifying your email…",
+    type: "loading",
+  });
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [userEmail, setUserEmail] = useState("");
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
-    useEffect(() => {
-        const token = searchParams.get('token');
-        const email = searchParams.get('email'); // Optional email parameter
-        
-        if (email) {
-            setUserEmail(email);
-        }
+  // Initial verification attempt
+  useEffect(() => {
+    const token = searchParams.get("token");
+    const email = searchParams.get("email");
+    if (email) setUserEmail(email);
+    if (!token) {
+      setStatus({
+        message:
+          "Missing verification token. Please use the link from your email or request a new one.",
+        type: "error",
+      });
+      return;
+    }
+    verifyEmail(token);
+  }, [searchParams]);
 
-        if (!token) {
-            setStatus({ 
-                message: 'Invalid or missing verification link. Please check your email for the correct link.', 
-                type: 'error' 
-            });
-            return;
-        }
+  // Cooldown timer for resend button
+  useEffect(() => {
+    if (resendCooldown > 0) {
+      const t = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+      return () => clearTimeout(t);
+    }
+  }, [resendCooldown]);
 
-        verifyEmail(token);
-    }, [searchParams]);
+  async function verifyEmail(token) {
+    try {
+      setStatus({ message: "Verifying your email…", type: "loading" });
+      await apiClient.get(
+        `/api/users/verify-email?token=${encodeURIComponent(token)}`,
+      );
+      setStatus({
+        message: "Email verified successfully. Redirecting you to login…",
+        type: "success",
+      });
+      toast.success("Email verified");
+      setTimeout(() => navigate("/login?verified=true"), 2500);
+    } catch (err) {
+      console.error("Email verification error:", err);
+      const detail = err.response?.data?.detail || "";
+      if (detail.includes("expired")) {
+        setStatus({
+          message:
+            "This verification link has expired. Request a new one below.",
+          type: "expired",
+        });
+      } else if (detail.includes("invalid")) {
+        setStatus({
+          message:
+            "Invalid verification link. Ensure you copied the full link.",
+          type: "error",
+        });
+      } else if (detail.includes("already verified")) {
+        setStatus({
+          message: "Already verified. Redirecting you to login…",
+          type: "already_verified",
+        });
+        setTimeout(() => navigate("/login?verified=true"), 2000);
+      } else {
+        setStatus({
+          message: "Verification failed. The link may be invalid or expired.",
+          type: "error",
+        });
+      }
+    }
+  }
 
-    // Cooldown timer for resend button
-    useEffect(() => {
-        if (resendCooldown > 0) {
-            const timer = setTimeout(() => {
-                setResendCooldown(resendCooldown - 1);
-            }, 1000);
-            return () => clearTimeout(timer);
-        }
-    }, [resendCooldown]);
+  async function handleResendVerification() {
+    if (!userEmail) {
+      toast.error("Enter your email to resend.");
+      return;
+    }
+    try {
+      setResendLoading(true);
+      await apiClient.post("/api/users/resend-verification", {
+        email: userEmail,
+      });
+      toast.success("Verification email sent");
+      setResendCooldown(60);
+    } catch (err) {
+      const detail = err.response?.data?.detail || "";
+      if (detail.includes("rate limit")) {
+        toast.error("Please wait a bit before requesting again.");
+      } else {
+        toast.error("Failed to resend. Try again later.");
+      }
+    } finally {
+      setResendLoading(false);
+    }
+  }
 
-    const verifyEmail = async (token) => {
-        try {
-            setStatus({ 
-                message: 'Verifying your email address...', 
-                type: 'loading' 
-            });
+  function StatusIcon() {
+    switch (status.type) {
+      case "success":
+      case "already_verified":
+        return (
+          <CheckCircleIcon
+            className="h-5 w-5 text-green-600"
+            aria-hidden="true"
+          />
+        );
+      case "error":
+      case "expired":
+        return (
+          <XCircleIcon className="h-5 w-5 text-red-600" aria-hidden="true" />
+        );
+      case "loading":
+        return (
+          <div
+            className="h-5 w-5 rounded-full border-2 border-blue-400 border-t-transparent animate-spin"
+            aria-hidden="true"
+          />
+        );
+      default:
+        return (
+          <InformationCircleIcon
+            className="h-5 w-5 text-blue-600"
+            aria-hidden="true"
+          />
+        );
+    }
+  }
 
-            // Call the correct backend endpoint
-            const response = await apiClient.post('/auth/verify-email', { token });
-            
-            setStatus({ 
-                message: 'Email verified successfully! You can now access all features of Impact ID.', 
-                type: 'success' 
-            });
-            
-            // Show success toast
-            toast.success('Email verified successfully!');
-            
-            // Redirect to login with success parameter
-            setTimeout(() => {
-                navigate('/login?verified=true');
-            }, 3000);
-            
-        } catch (err) {
-            console.error('Email verification error:', err);
-            
-            const detail = err.response?.data?.detail;
-            
-            if (detail) {
-                if (detail.includes('expired')) {
-                    setStatus({ 
-                        message: 'This verification link has expired. Please request a new verification email.', 
-                        type: 'expired' 
-                    });
-                } else if (detail.includes('invalid')) {
-                    setStatus({ 
-                        message: 'Invalid verification link. Please check your email for the correct link.', 
-                        type: 'error' 
-                    });
-                } else if (detail.includes('already verified')) {
-                    setStatus({ 
-                        message: 'This email has already been verified. You can now log in to your account.', 
-                        type: 'already_verified' 
-                    });
-                    setTimeout(() => {
-                        navigate('/login?verified=true');
-                    }, 3000);
-                } else {
-                    setStatus({ message: detail, type: 'error' });
-                }
-            } else {
-                setStatus({ 
-                    message: 'Verification failed. The link may be invalid or has expired.', 
-                    type: 'error' 
-                });
-            }
-        }
-    };
+  const intentStyles = {
+    success: "bg-green-50 text-green-700 border-green-200",
+    already_verified: "bg-green-50 text-green-700 border-green-200",
+    error: "bg-red-50 text-red-700 border-red-200",
+    expired: "bg-red-50 text-red-700 border-red-200",
+    loading: "bg-blue-50 text-blue-700 border-blue-200",
+    default: "bg-gray-50 text-gray-700 border-gray-200",
+  };
+  const boxClass = intentStyles[status.type] || intentStyles.default;
 
-    const handleResendVerification = async () => {
-        if (!userEmail) {
-            toast.error('Please provide your email address to resend verification.');
-            return;
-        }
+  const footer = (
+    <div className="flex flex-col space-y-2 text-xs text-gray-500 dark:text-gray-400">
+      <p className="font-medium text-gray-600 dark:text-gray-300">
+        Trouble verifying?
+      </p>
+      <ul className="list-disc ml-4 space-y-1">
+        <li>Check spam/junk folder</li>
+        <li>Links expire after 24h</li>
+        <li>Use the original device/browser if possible</li>
+      </ul>
+      <div className="flex justify-between pt-1">
+        <Link to="/register" className="text-blue-600 hover:text-blue-500">
+          Register
+        </Link>
+        <Link to="/support" className="text-blue-600 hover:text-blue-500">
+          Support
+        </Link>
+      </div>
+    </div>
+  );
 
-        try {
-            setResendLoading(true);
-            
-            // Call resend verification endpoint
-            await apiClient.post('/auth/resend-verification', { email: userEmail });
-            
-            toast.success('Verification email sent! Please check your inbox.');
-            setResendCooldown(60); // 60 second cooldown
-            
-        } catch (err) {
-            console.error('Resend verification error:', err);
-            const detail = err.response?.data?.detail;
-            
-            if (detail && detail.includes('rate limit')) {
-                toast.error('Please wait before requesting another verification email.');
-            } else {
-                toast.error('Failed to resend verification email. Please try again later.');
-            }
-        } finally {
-            setResendLoading(false);
-        }
-    };
+  return (
+    <AuthLayout
+      title="Verify Email"
+      subtitle={
+        status.type === "loading"
+          ? "We are confirming your email ownership."
+          : "Complete this step to unlock your account."
+      }
+      icon={<EnvelopeIcon className="h-6 w-6 text-white" aria-hidden="true" />}
+      footer={footer}
+    >
+      {/* Status */}
+      <div
+        className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-relaxed ${boxClass}`}
+        role="status"
+        aria-live="polite"
+      >
+        <StatusIcon />
+        <p className="font-medium">{status.message}</p>
+      </div>
 
-    const getStatusIcon = () => {
-        switch (status.type) {
-            case 'success':
-            case 'already_verified':
-                return <CheckCircleIcon className="h-16 w-16 text-green-600 mx-auto" />;
-            case 'error':
-            case 'expired':
-                return <XCircleIcon className="h-16 w-16 text-red-600 mx-auto" />;
-            case 'loading':
-                return (
-                    <div className="mx-auto h-16 w-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full flex items-center justify-center">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
-                    </div>
-                );
-            default:
-                return <InformationCircleIcon className="h-16 w-16 text-blue-600 mx-auto" />;
-        }
-    };
-
-    const getStatusColor = () => {
-        switch (status.type) {
-            case 'success':
-            case 'already_verified':
-                return 'text-green-800';
-            case 'error':
-            case 'expired':
-                return 'text-red-800';
-            case 'loading':
-                return 'text-blue-800';
-            default:
-                return 'text-gray-800';
-        }
-    };
-
-    const getBackgroundColor = () => {
-        switch (status.type) {
-            case 'success':
-            case 'already_verified':
-                return 'bg-green-50 border-green-200';
-            case 'error':
-            case 'expired':
-                return 'bg-red-50 border-red-200';
-            case 'loading':
-                return 'bg-blue-50 border-blue-200';
-            default:
-                return 'bg-gray-50 border-gray-200';
-        }
-    };
-
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex flex-col justify-center items-center p-4">
-            <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-6 border border-gray-100">
-                {/* Header */}
-                <div className="text-center">
-                    <div className="mb-4">
-                        {getStatusIcon()}
-                    </div>
-                    <h2 className="text-3xl font-bold text-gray-900">Email Verification</h2>
-                    <p className="mt-2 text-sm text-gray-600">
-                        {status.type === 'loading' 
-                            ? 'Please wait while we verify your email address...'
-                            : 'Secure your Impact ID account'
-                        }
-                    </p>
-                </div>
-
-                {/* Status Message */}
-                <div className={`p-4 rounded-lg border ${getBackgroundColor()}`}>
-                    <p className={`text-sm font-medium ${getStatusColor()} text-center`}>
-                        {status.message}
-                    </p>
-                </div>
-
-                {/* Email Input for Resend (if no email in URL) */}
-                {(status.type === 'expired' || status.type === 'error') && !userEmail && (
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Email Address
-                        </label>
-                        <div className="relative">
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <EnvelopeIcon className="h-5 w-5 text-gray-400" />
-                            </div>
-                            <input
-                                type="email"
-                                placeholder="Enter your email address"
-                                value={userEmail}
-                                onChange={(e) => setUserEmail(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
-                            />
-                        </div>
-                    </div>
-                )}
-
-                {/* Action Buttons */}
-                <div className="space-y-3">
-                    {status.type === 'success' && (
-                        <Link
-                            to="/login?verified=true"
-                            className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 active:scale-95 flex items-center justify-center space-x-2"
-                        >
-                            <span>Continue to Login</span>
-                            <ArrowRightIcon className="h-4 w-4" />
-                        </Link>
-                    )}
-
-                    {status.type === 'already_verified' && (
-                        <Link
-                            to="/login?verified=true"
-                            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 active:scale-95 flex items-center justify-center space-x-2"
-                        >
-                            <span>Go to Login</span>
-                            <ArrowRightIcon className="h-4 w-4" />
-                        </Link>
-                    )}
-
-                    {(status.type === 'expired' || status.type === 'error') && (
-                        <button
-                            onClick={handleResendVerification}
-                            disabled={resendLoading || resendCooldown > 0 || !userEmail}
-                            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95"
-                        >
-                            {resendLoading ? (
-                                <div className="flex items-center justify-center space-x-2">
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                                    <span>Sending...</span>
-                                </div>
-                            ) : resendCooldown > 0 ? (
-                                <div className="flex items-center justify-center space-x-2">
-                                    <ClockIcon className="h-4 w-4" />
-                                    <span>Resend in {resendCooldown}s</span>
-                                </div>
-                            ) : (
-                                <div className="flex items-center justify-center space-x-2">
-                                    <EnvelopeIcon className="h-4 w-4" />
-                                    <span>Resend Verification Email</span>
-                                </div>
-                            )}
-                        </button>
-                    )}
-
-                    <Link
-                        to="/login"
-                        className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-3 px-4 rounded-lg transition duration-300 ease-in-out text-center block"
-                    >
-                        Return to Login
-                    </Link>
-                </div>
-
-                {/* Help Information */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <div className="flex">
-                        <InformationCircleIcon className="h-5 w-5 text-blue-600 mr-2 flex-shrink-0 mt-0.5" />
-                        <div className="text-xs text-blue-800">
-                            <p className="mb-1"><strong>Need help?</strong></p>
-                            <ul className="space-y-1">
-                                <li>• Check your spam/junk folder</li>
-                                <li>• Verification links expire after 24 hours</li>
-                                <li>• Make sure to click the link from the same device</li>
-                                <li>• Contact support if issues persist</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Additional Actions */}
-                <div className="text-center">
-                    <div className="flex justify-center space-x-4 text-sm">
-                        <Link 
-                            to="/register" 
-                            className="text-blue-600 hover:text-blue-500 transition-colors"
-                        >
-                            Create New Account
-                        </Link>
-                        <span className="text-gray-300">•</span>
-                        <Link 
-                            to="/support" 
-                            className="text-blue-600 hover:text-blue-500 transition-colors"
-                        >
-                            Contact Support
-                        </Link>
-                    </div>
-                </div>
-
-                {/* Features Preview */}
-                <div className="border-t border-gray-200 pt-6">
-                    <p className="text-center text-xs text-gray-500 mb-3">Complete verification to unlock:</p>
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                        <div className="text-xs">
-                            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-1">
-                                <SparklesIcon className="h-4 w-4 text-blue-600" />
-                            </div>
-                            <p className="text-gray-600">Earn XP</p>
-                        </div>
-                        <div className="text-xs">
-                            <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-1">
-                                <CheckCircleIcon className="h-4 w-4 text-green-600" />
-                            </div>
-                            <p className="text-gray-600">Get Badges</p>
-                        </div>
-                        <div className="text-xs">
-                            <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-1">
-                                <EnvelopeIcon className="h-4 w-4 text-purple-600" />
-                            </div>
-                            <p className="text-gray-600">Notifications</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
+      {/* Email input (only when we need to resend and no email passed) */}
+      {(status.type === "expired" || status.type === "error") && !userEmail && (
+        <div className="space-y-1">
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">
+            Email address
+          </label>
+          <div className="relative">
+            <span className="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none">
+              <EnvelopeIcon className="h-4 w-4 text-gray-400" />
+            </span>
+            <input
+              type="email"
+              value={userEmail}
+              onChange={(e) => setUserEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full pl-8 pr-3 py-2 rounded-md text-sm bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
         </div>
-    );
+      )}
+
+      {/* Actions */}
+      <div className="space-y-2 pt-1">
+        {["success", "already_verified"].includes(status.type) && (
+          <Link
+            to="/login?verified=true"
+            className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 transition-colors"
+          >
+            Continue to login <ArrowRightIcon className="h-4 w-4" />
+          </Link>
+        )}
+
+        {(status.type === "expired" || status.type === "error") && (
+          <button
+            onClick={handleResendVerification}
+            disabled={resendLoading || resendCooldown > 0 || !userEmail}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white text-sm font-medium py-2 transition-colors"
+          >
+            {resendLoading && (
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            )}
+            {!resendLoading && resendCooldown > 0 && (
+              <ClockIcon className="h-4 w-4" />
+            )}
+            {resendLoading
+              ? "Sending…"
+              : resendCooldown > 0
+                ? `Resend in ${resendCooldown}s`
+                : "Resend verification email"}
+          </button>
+        )}
+
+        <Link
+          to="/login"
+          className="inline-flex w-full items-center justify-center rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium py-2 transition-colors"
+        >
+          Return to login
+        </Link>
+      </div>
+    </AuthLayout>
+  );
 }
