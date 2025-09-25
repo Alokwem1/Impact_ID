@@ -1,0 +1,62 @@
+{
+  "timestamp": "2025-09-25T12:59:59.589094",
+  "backend_tests": {
+    "Unit Tests": {
+      "duration": 0.4962129592895508,
+      "memory_delta_mb": 0.0,
+      "return_code": 1,
+      "stdout_length": 5146,
+      "stderr_length": 0,
+      "success": false
+    },
+    "Integration Tests": {
+      "duration": 0.7482719421386719,
+      "memory_delta_mb": 0.0,
+      "return_code": 1,
+      "stdout_length": 6207,
+      "stderr_length": 0,
+      "success": false
+    },
+    "Comprehensive Tests": {
+      "duration": 0.3254663944244385,
+      "memory_delta_mb": 0.0,
+      "return_code": 1,
+      "stdout_length": 5349,
+      "stderr_length": 0,
+      "success": false
+    },
+    "Smoke Test": {
+      "duration": 0.2516305446624756,
+      "memory_delta_mb": 0.0,
+      "return_code": 0,
+      "stdout_length": 523,
+      "stderr_length": 0,
+      "success": true
+    }
+  },
+  "frontend_tests": {
+    "All Tests": {
+      "duration": 12.689279317855835,
+      "memory_delta_mb": 0.375,
+      "return_code": 1,
+      "stdout_length": 23353,
+      "stderr_length": 137586,
+      "success": false
+    },
+    "Coverage": {
+      "duration": 16.39185070991516,
+      "memory_delta_mb": 0.625,
+      "return_code": 1,
+      "stdout_length": 23698,
+      "stderr_length": 137586,
+      "success": false
+    }
+  },
+  "system_metrics": {
+    "memory_rss_mb": 14.046875,
+    "memory_vms_mb": 21.3359375,
+    "cpu_percent": 0.0,
+    "system_memory_percent": 9.8,
+    "system_memory_available_gb": 14.091449737548828
+  }
+}
