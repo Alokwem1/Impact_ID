@@ -1,56 +1,60 @@
-name: CI
+name: CI Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
-  backend:
+  test:
+    name: Run Tests
     runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:latest
+        ports:
+          - 6379:6379
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
-      - name: Install backend deps (dev)
-        working-directory: backend
+          python-version: 3.10
+
+      - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-      - name: Run backend tests with coverage
-        working-directory: backend
-        run: pytest -q --cov=app --cov-report=term-missing --cov-report=xml:coverage-backend.xml
-      - name: Upload backend coverage artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: |
-            backend/coverage-backend.xml
-            backend/.coverage*
+          pip install -r backend/requirements.txt
 
-  frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - name: Run backend tests
+        working-directory: backend
+        run: |
+          pytest --cov=app --cov-report=xml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install frontend deps
+          node-version: 18
+
+      - name: Install frontend dependencies
         working-directory: frontend
-        run: npm install --legacy-peer-deps
-      - name: Run frontend tests with coverage
+        run: npm install
+
+      - name: Run frontend tests
         working-directory: frontend
         run: npm run test:coverage
-      - name: Upload coverage artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v3
         with:
-          name: frontend-coverage
-          path: frontend/coverage
+          name: coverage-reports
+          path: |
+            backend/coverage.xml
+            frontend/coverage

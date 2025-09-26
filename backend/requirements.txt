@@ -3,9 +3,11 @@ fastapi==0.110.0
 uvicorn[standard]==0.29.0       # ASGI server with logging, reloading, websockets
 
 # === 🗄️ Database & ORM ===
-sqlalchemy==2.0.30              # Modern, async-capable ORM
-psycopg2-binary==2.9.9          # PostgreSQL adapter
-asyncpg==0.28.0                 # Async PostgreSQL adapter required by SQLAlchemy async engines
+sqlalchemy==2.0.34              # Modern, async-capable ORM (upgraded for Python 3.13 compatibility)
+# NOTE: Postgres drivers temporarily disabled for local Windows + Python 3.13 test environment.
+# Uncomment for production / deployment targeting PostgreSQL.
+# psycopg2-binary==2.9.9          # PostgreSQL adapter
+# asyncpg==0.28.0                 # Async PostgreSQL adapter required by SQLAlchemy async engines
 python-dotenv==1.0.1            # .env config
 alembic==1.11.2                 # Database migrations
 prometheus-client==0.20.0       # Metrics exposition for Prometheus
@@ -30,7 +32,8 @@ pytest-asyncio==0.23.6          # Async test support
 
 # === 🧳 Deployment (WSGI/ASGI Server) ===
 gunicorn==21.2.0                # Production server (if using w/ Docker)
-uvloop==0.17.0                  # Faster event loop for production
+# uvloop not supported on Windows; keep commented locally. Enable in Linux containers.
+# uvloop==0.17.0                  # Faster event loop for production
 
 # === ✨ Developer Experience (Optional) ===
 black==24.4.2                   # Code formatter

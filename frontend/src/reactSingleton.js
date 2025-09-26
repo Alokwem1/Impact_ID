@@ -1,6 +1,5 @@
 // Ensures every part of the app shares the exact same React module instance.
 // Avoids re-export * interop warning by explicitly enumerating exports.
-/* eslint-disable no-console */
 import * as ReactAll from 'react';
 
 if (typeof window !== 'undefined') {

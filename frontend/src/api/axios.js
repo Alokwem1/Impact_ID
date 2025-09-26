@@ -505,12 +505,7 @@ const testConnection = async () => {
     if (isDevelopment)
       console.log("✅ Health check successful:", healthResponse.data);
 
-    // Optional root info (suppress logging to avoid noisy 404s on dev server root)
-    try {
-      await apiClient.get("/", { timeout: 3000, suppressLogging: true, suppressNotFoundToast: true });
-    } catch {
-      // ignore
-    }
+    // Skip probing frontend root to avoid 404 noise in dev
     connectionAttempt = 0; // reset after success
   } catch (error) {
     if (isDevelopment) {

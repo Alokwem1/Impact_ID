@@ -187,7 +187,9 @@ async def get_all_badges_with_user_status(
     if rarity:
         stmt = stmt.where(models.Badge.rarity == rarity)
 
-    stmt = stmt.order_by(models.Badge.display_order, models.Badge.created_at)
+    # Order by available columns (display_order does not exist on the model)
+    # Use title then created_at for deterministic ordering
+    stmt = stmt.order_by(models.Badge.title, models.Badge.created_at)
 
     result = await db.execute(stmt)
     all_badges = result.scalars().all()

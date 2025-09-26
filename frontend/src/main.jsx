@@ -1,13 +1,13 @@
-import "./dev/reactDuplicateDiagnostics"; // must come first
-import "./dev/reactIdentityMatrix"; // captures React identity relationships early
+// Disabled by default: early dev diagnostics can evaluate React multiple times and
+// increase chances of duplicate React instances in complex setups.
+// import "./dev/reactDuplicateDiagnostics";
+// import "./dev/reactIdentityMatrix";
 import React from "react";
-// Early import: diagnostics for duplicate React instances
-import "./dev/reactIdentityMatrix.js";
+// import "./dev/reactIdentityMatrix.js";
 import ReactDOM from "react-dom/client";
 // Log renderer vs core React versions for mismatch detection
 // (Will only log once on cold start)
 try {
-  // eslint-disable-next-line no-console
   console.log('[diagnostic] React renderer + core versions', React.version, ReactDOM.version || 'react-dom/client');
 } catch {}
 import PropTypes from "prop-types";

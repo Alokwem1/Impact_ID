@@ -304,7 +304,7 @@ function AnimatedRoutes() {
   );
 }
 
-function App() {
+function AppCore() {
   const searchParams = new URLSearchParams(window.location.search);
   const simpleMode = searchParams.has('simple') || import.meta.env.VITE_DIAG_SIMPLE === '1';
   const layerParam = searchParams.get('layer');
@@ -314,30 +314,15 @@ function App() {
   {
     const dispatcher = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?.ReactCurrentDispatcher?.current;
     if (import.meta.env.DEV) {
+      // Only log; do not block render. Some dev toolchains transiently show null here
+      // even though hooks are safe to call during actual render.
       if (!dispatcher) {
-        console.error('[diagnostic] Dispatcher null at App render entry BEFORE any hook calls');
+        console.warn('[diagnostic] Dispatcher not observed yet at App entry; proceeding with render');
       } else {
         console.log('[diagnostic] Dispatcher OK at App entry');
       }
     }
-    if (!dispatcher) {
-      return (
-        <div className="min-h-screen flex items-center justify-center p-8 bg-red-50 dark:bg-red-950">
-          <div className="max-w-md w-full bg-white dark:bg-gray-900 border border-red-200 dark:border-red-700 rounded-xl p-6 space-y-4 text-center">
-            <h1 className="text-lg font-semibold text-red-700 dark:text-red-300">React hooks not initialized</h1>
-            <p className="text-sm text-red-600 dark:text-red-400 leading-relaxed">
-              The React hooks dispatcher is null at render. This is usually caused by multiple React copies being loaded or a dev server cache issue.
-            </p>
-            <ol className="text-xs text-left list-decimal ml-5 space-y-1 text-red-700 dark:text-red-300">
-              <li>Stop the dev server.</li>
-              <li>Delete the folder: <code>node_modules/.vite</code></li>
-              <li>Start it again (npm run dev).</li>
-              <li>Ensure only one React version is installed.</li>
-            </ol>
-          </div>
-        </div>
-      );
-    }
+    // Do not return early; continue with normal render path
   }
   const prefetchActivatedRef = React.useRef(false);
 
@@ -363,13 +348,9 @@ function App() {
         })
         .catch((e) => console.warn("[prefetch:import] failed", e));
     };
-    if ("requestIdleCallback" in window) {
-      const id = window.requestIdleCallback(activate, { timeout: 1500 });
-      return () => window.cancelIdleCallback && window.cancelIdleCallback(id);
-    } else {
-      const t = setTimeout(activate, 120);
-      return () => clearTimeout(t);
-    }
+    // Defer until after first paint to avoid any interference with initial dispatcher setup
+    const t = setTimeout(activate, 1000);
+    return () => clearTimeout(t);
   }, []);
   // Defensive: if hooks dispatcher is missing, surface early helpful message instead of cryptic stack
   if (!React || typeof React.useEffect !== 'function') {
@@ -595,6 +576,47 @@ function App() {
       </Router>
     </ErrorBoundary>
   );
+}
+
+class App extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { ready: false };
+    this._tick = null;
+  }
+
+  componentDidMount() {
+    const check = () => {
+      const dispatcher = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?.ReactCurrentDispatcher?.current;
+      if (dispatcher && !this.state.ready) {
+        this.setState({ ready: true });
+      } else if (!dispatcher) {
+        // try again shortly; avoid tight loop
+        this._tick = setTimeout(check, 30);
+      }
+    };
+    check();
+  }
+
+  componentWillUnmount() {
+    if (this._tick) clearTimeout(this._tick);
+  }
+
+  render() {
+    const dispatcher = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED?.ReactCurrentDispatcher?.current;
+    if (!dispatcher) {
+      // Minimal non-hook fallback until dispatcher is ready
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-600 dark:text-gray-300">
+          <div>
+            <div className="loading-spinner mb-4" aria-label="Loading" />
+            <div className="text-center text-sm">Preparing application…</div>
+          </div>
+        </div>
+      );
+    }
+    return <AppCore />;
+  }
 }
 
 export default App;

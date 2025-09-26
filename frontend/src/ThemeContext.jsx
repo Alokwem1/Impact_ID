@@ -1,68 +1,91 @@
-import { createContext, useState, useEffect, useContext, useMemo } from "react";
+import React from "react";
 import PropTypes from "prop-types";
 
 const THEME_KEY = "impactid-theme";
-const ThemeContext = createContext();
+const ThemeContext = React.createContext();
 
 export const useTheme = () => {
-  const context = useContext(ThemeContext);
+  const context = React.useContext(ThemeContext);
   if (!context) {
     throw new Error("useTheme must be used within a ThemeProvider");
   }
   return context;
 };
 
-export const ThemeProvider = ({ children }) => {
-  const [theme, setTheme] = useState(() => {
-    // Check for saved theme preference
+export class ThemeProvider extends React.Component {
+  constructor(props) {
+    super(props);
     const savedTheme = localStorage.getItem(THEME_KEY);
-    if (savedTheme && (savedTheme === "light" || savedTheme === "dark")) {
-      return savedTheme;
+    const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const initialTheme = savedTheme && (savedTheme === "light" || savedTheme === "dark")
+      ? savedTheme
+      : (systemPrefersDark ? "dark" : "light");
+    this.state = {
+      theme: initialTheme,
+      isSystemTheme: !savedTheme,
+    };
+    this.handleSystemChange = this.handleSystemChange.bind(this);
+    this.toggleTheme = this.toggleTheme.bind(this);
+    this.setLightTheme = this.setLightTheme.bind(this);
+    this.setDarkTheme = this.setDarkTheme.bind(this);
+    this.useSystemTheme = this.useSystemTheme.bind(this);
+  }
+
+  componentDidMount() {
+    this.applyThemeSideEffects();
+    if (this.state.isSystemTheme) {
+      this.mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      this.mediaQuery.addEventListener("change", this.handleSystemChange);
     }
+  }
 
-    // Fall back to system preference
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-  });
+  componentDidUpdate(prevProps, prevState) {
+    if (
+      prevState.theme !== this.state.theme ||
+      prevState.isSystemTheme !== this.state.isSystemTheme
+    ) {
+      this.applyThemeSideEffects();
+      if (!prevState.isSystemTheme && this.state.isSystemTheme) {
+        this.mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+        this.mediaQuery.addEventListener("change", this.handleSystemChange);
+      }
+      if (prevState.isSystemTheme && !this.state.isSystemTheme && this.mediaQuery) {
+        this.mediaQuery.removeEventListener("change", this.handleSystemChange);
+      }
+    }
+  }
 
-  const [isSystemTheme, setIsSystemTheme] = useState(() => {
-    return !localStorage.getItem(THEME_KEY);
-  });
+  componentWillUnmount() {
+    if (this.mediaQuery) {
+      this.mediaQuery.removeEventListener("change", this.handleSystemChange);
+    }
+  }
 
-  useEffect(() => {
+  handleSystemChange(e) {
+    this.setState({ theme: e.matches ? "dark" : "light" });
+  }
+
+  applyThemeSideEffects() {
+    const { theme, isSystemTheme } = this.state;
     const root = window.document.documentElement;
-
-    // Remove existing theme classes
     root.classList.remove("light", "dark");
-
-    // Apply current theme
     root.classList.add(theme);
-
-    // Save to localStorage if not using system preference
     if (!isSystemTheme) {
       localStorage.setItem(THEME_KEY, theme);
+    } else {
+      localStorage.removeItem(THEME_KEY);
     }
 
-    // Update meta theme-color for mobile browsers
     const themeColorMeta =
       document.querySelector('meta[name="theme-color"]') ||
       document.createElement("meta");
-
     if (!themeColorMeta.parentNode) {
       themeColorMeta.setAttribute("name", "theme-color");
       document.head.appendChild(themeColorMeta);
     }
-
-    // Impact ID brand colors for theme-color
-    const themeColors = {
-      light: "#2563eb", // Impact ID blue
-      dark: "#18181b", // Dark gray
-    };
-
+    const themeColors = { light: "#2563eb", dark: "#18181b" };
     themeColorMeta.setAttribute("content", themeColors[theme]);
 
-    // Update Safari status bar style
     let statusBarMeta = document.querySelector(
       'meta[name="apple-mobile-web-app-status-bar-style"]',
     );
@@ -78,62 +101,34 @@ export const ThemeProvider = ({ children }) => {
       "content",
       theme === "dark" ? "black-translucent" : "default",
     );
-  }, [theme, isSystemTheme]);
+  }
 
-  // Listen for system theme changes when using system preference
-  useEffect(() => {
-    if (!isSystemTheme) return;
+  toggleTheme() {
+    this.setState((s) => ({ theme: s.theme === "light" ? "dark" : "light", isSystemTheme: false }));
+  }
 
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  setLightTheme() {
+    this.setState({ theme: "light", isSystemTheme: false });
+  }
 
-    const handleSystemThemeChange = (e) => {
-      setTheme(e.matches ? "dark" : "light");
-    };
+  setDarkTheme() {
+    this.setState({ theme: "dark", isSystemTheme: false });
+  }
 
-    mediaQuery.addEventListener("change", handleSystemThemeChange);
+  useSystemTheme() {
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    this.setState({ theme: systemTheme, isSystemTheme: true });
+  }
 
-    return () => {
-      mediaQuery.removeEventListener("change", handleSystemThemeChange);
-    };
-  }, [isSystemTheme]);
-
-  const toggleTheme = () => {
-    setTheme((prevTheme) => {
-      const newTheme = prevTheme === "light" ? "dark" : "light";
-      setIsSystemTheme(false); // User manually toggled, so stop following system
-      return newTheme;
-    });
-  };
-
-  const setLightTheme = () => {
-    setTheme("light");
-    setIsSystemTheme(false);
-  };
-
-  const setDarkTheme = () => {
-    setTheme("dark");
-    setIsSystemTheme(false);
-  };
-
-  const useSystemTheme = () => {
-    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
-      .matches
-      ? "dark"
-      : "light";
-    setTheme(systemTheme);
-    setIsSystemTheme(true);
-    localStorage.removeItem(THEME_KEY); // Remove saved preference
-  };
-
-  const value = useMemo(
-    () => ({
+  render() {
+    const { theme, isSystemTheme } = this.state;
+    const value = {
       theme,
       isSystemTheme,
-      toggleTheme,
-      setLightTheme,
-      setDarkTheme,
-      useSystemTheme,
-      // Theme-aware color utilities
+      toggleTheme: this.toggleTheme,
+      setLightTheme: this.setLightTheme,
+      setDarkTheme: this.setDarkTheme,
+      useSystemTheme: this.useSystemTheme,
       colors: {
         primary: theme === "dark" ? "#3b82f6" : "#2563eb",
         background: theme === "dark" ? "#0f172a" : "#ffffff",
@@ -141,21 +136,12 @@ export const ThemeProvider = ({ children }) => {
         text: theme === "dark" ? "#f1f5f9" : "#0f172a",
         muted: theme === "dark" ? "#64748b" : "#6b7280",
       },
-    }),
-    [
-      theme,
-      isSystemTheme,
-      toggleTheme,
-      setLightTheme,
-      setDarkTheme,
-      useSystemTheme,
-    ],
-  );
-
-  return (
-    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
-  );
-};
+    };
+    return (
+      <ThemeContext.Provider value={value}>{this.props.children}</ThemeContext.Provider>
+    );
+  }
+}
 
 // PropTypes for ThemeProvider
 ThemeProvider.propTypes = {

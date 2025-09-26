@@ -194,3 +194,27 @@ node scripts/release-check.mjs
 
 ## Deployment Checklist Reference
 See `DEPLOY_CHECKLIST.md` at the repo root for a step-by-step preflight list before releasing.
+
+## Deploying to Production (Quick Guide)
+
+1) Backend
+- Recommended DB: Postgres (set DATABASE_URL)
+- Run migrations: set `RUN_DB_MIGRATIONS=1`
+- Harden security headers: ensure `ENVIRONMENT=production`; serve over HTTPS (enable HSTS via reverse proxy)
+- Observability: enable `JSON_LOGS=true`; scrape `/metrics` with Prometheus or similar
+
+2) Frontend
+- Build: `cd frontend && npm ci && npm run build`
+- Serve: any static server or Nginx (see `frontend/nginx.conf` as a reference)
+- Env: create `frontend/.env.production` (e.g. API base URL, feature flags). Optional visual flag: `VITE_UI_ENHANCEMENTS=true`
+
+3) Reverse Proxy
+- Terminate TLS, cache static, and forward `/api` and `/ws` to backend
+- Add gzip/brotli, and long cache headers for assets
+
+4) Health & Monitoring
+- Probe `/live` and `/ready`; alarm on failures
+- Collect logs, and watch latency histograms from `/metrics`
+
+5) Rollback safety
+- Keep last two builds; add environment flags for quick visual toggles

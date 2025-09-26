@@ -1,0 +1,10 @@
+/* Team */
+Developer: Impact ID Team
+Site: https://impactid.xyz
+
+/* Technology */
+Frontend: React + Vite
+Backend: FastAPI
+
+/* Contact */
+Email: hello@impactid.xyz

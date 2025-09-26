@@ -487,6 +487,11 @@ class BadgeOut(BadgeBase):
     created_at: datetime
     awarded_count: int = 0
     is_active: bool = True
+    # Optional user-specific fields that list endpoints may enrich
+    is_earned: bool = False
+    awarded_at: Optional[datetime] = None
+    progress_percentage: Optional[float] = None
+    progress_description: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class BadgeDetailOut(BadgeOut):

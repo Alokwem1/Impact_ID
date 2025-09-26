@@ -53,7 +53,6 @@ function RouteErrorFallback({ error, resetErrorBoundary }) {
       }
     }
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
       console.error("[RouteErrorBoundary] Caught error:", error);
     }
   }, [error, isChunkLoadError]);

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 240" width="600" height="240" role="img" aria-label="Onboarding hero placeholder">
+  <defs>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#eef2ff"/>
+      <stop offset="100%" stop-color="#f5f3ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="600" height="240" fill="url(#g2)"/>
+  <g fill="#c7d2fe">
+    <circle cx="100" cy="160" r="40"/>
+    <rect x="160" y="120" width="260" height="40" rx="8"/>
+    <rect x="160" y="170" width="200" height="20" rx="6"/>
+  </g>
+  <g fill="#a78bfa">
+    <circle cx="520" cy="60" r="22"/>
+    <circle cx="560" cy="90" r="12"/>
+  </g>
+  <text x="30" y="50" font-family="system-ui, -apple-system, Segoe UI, Roboto" font-size="20" fill="#4f46e5">Welcome to Impact ID</text>
+  <text x="30" y="75" font-family="system-ui, -apple-system, Segoe UI, Roboto" font-size="12" fill="#6b7280">Onboarding illustration placeholder</text>
+  <!-- Replace with an unDraw/Storyset illustration later -->
+</svg>

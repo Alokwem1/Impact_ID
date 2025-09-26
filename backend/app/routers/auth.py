@@ -56,6 +56,8 @@ async def login_for_access_token(
         result = await db.execute(query)
         user = result.scalar_one_or_none()
 
+        logger.debug("Login attempt for user: %s with status: %s", login_data.username, user.status if user else "User not found")
+
         if not user or not verify_password(login_data.password, user.hashed_password):
             client_ip = getattr(request.client, 'host', 'unknown') if request else 'unknown'
             logger.warning("Failed login attempt for: %s from %s", login_data.username, client_ip)
@@ -492,4 +494,3 @@ async def check_email_availability(
         except Exception as e:
 
             raise HTTPException(status_code=500, detail="Error")
-            

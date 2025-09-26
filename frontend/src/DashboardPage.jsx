@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "./api/queryKeys";
 import { Link } from "react-router-dom";
@@ -34,6 +34,9 @@ import Leaderboard from "./user/Leaderboard";
 import BadgeList from "./user/BadgeList";
 import apiClient from "./api/axios";
 import toast from "react-hot-toast";
+import SectionHeader from "./components/ui/SectionHeader";
+import StatCard from "./components/ui/StatCard";
+import { ENABLE_UI_ENHANCEMENTS } from "./config/featureFlags";
 
 // ================================
 // 📊 DASHBOARD DATA FETCHING
@@ -582,63 +585,98 @@ export default function DashboardPage() {
 
             {/* Quick Stats Bar */}
             {dashboardData && (
-              <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center">
-                    <CheckCircleIconSolid className="h-8 w-8 text-green-500 mr-3" />
-                    <div>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                        {dashboardData.tasks_completed_today || 0}
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Today
-                      </p>
-                    </div>
+              ENABLE_UI_ENHANCEMENTS ? (
+                <div className="mt-6 space-y-4">
+                  <SectionHeader title="Quick stats" subtitle="Snapshot of your progress" />
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <StatCard
+                      label="Today"
+                      value={dashboardData.tasks_completed_today || 0}
+                      icon={<CheckCircleIconSolid className="h-6 w-6 text-green-500" />}
+                    />
+                    <StatCard
+                      label="Streak"
+                      value={user.streak || 0}
+                      icon={<FireIconSolid className="h-6 w-6 text-orange-500" />}
+                    />
+                    <StatCard
+                      label="Level"
+                      value={Math.floor((user.xp || 0) / 1000) + 1}
+                      icon={<TrophyIconSolid className="h-6 w-6 text-yellow-500" />}
+                    />
+                    <StatCard
+                      label="Essence"
+                      value={user.essence_balance || 0}
+                      icon={<SparklesIconSolid className="h-6 w-6 text-purple-500" />}
+                    />
                   </div>
                 </div>
+              ) : (
+                <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div
+                    className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 transition-transform transform hover:scale-105"
+                    aria-label="Tasks Completed Today"
+                    style={{
+                      backgroundColor: "var(--color-surface)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    <div className="flex items-center">
+                      <CheckCircleIconSolid className="h-8 w-8 text-green-500 mr-3" />
+                      <div>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                          {dashboardData.tasks_completed_today || 0}
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          Today
+                        </p>
+                      </div>
+                    </div>
+                  </div>
 
-                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center">
-                    <FireIconSolid className="h-8 w-8 text-orange-500 mr-3" />
-                    <div>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                        {user.streak || 0}
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Streak
-                      </p>
+                  <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center">
+                      <FireIconSolid className="h-8 w-8 text-orange-500 mr-3" />
+                      <div>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                          {user.streak || 0}
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          Streak
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center">
-                    <TrophyIconSolid className="h-8 w-8 text-yellow-500 mr-3" />
-                    <div>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                        {Math.floor((user.xp || 0) / 1000) + 1}
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Level
-                      </p>
+                  <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center">
+                      <TrophyIconSolid className="h-8 w-8 text-yellow-500 mr-3" />
+                      <div>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                          {Math.floor((user.xp || 0) / 1000) + 1}
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          Level
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center">
-                    <SparklesIconSolid className="h-8 w-8 text-purple-500 mr-3" />
-                    <div>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                        {user.essence_balance || 0}
-                      </p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Essence
-                      </p>
+                  <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center">
+                      <SparklesIconSolid className="h-8 w-8 text-purple-500 mr-3" />
+                      <div>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                          {user.essence_balance || 0}
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          Essence
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              )
             )}
           </div>
 
@@ -665,7 +703,7 @@ export default function DashboardPage() {
                   <UserProfileSummary dashboardData={dashboardData} />
                 </section>
 
-                <section aria-labelledby="daily-goals-title">
+                <section aria-labelledby="daily-goals-title" role="region">
                   <h2 id="daily-goals-title" className="sr-only">
                     Daily Goals
                   </h2>
@@ -682,11 +720,13 @@ export default function DashboardPage() {
 
               {/* Right Sidebar */}
               <div className="space-y-6">
-                <section aria-labelledby="achievements-title">
+                <section aria-labelledby="achievements-title" role="region">
                   <h2 id="achievements-title" className="sr-only">
                     Recent Achievements
                   </h2>
-                  <RecentAchievements />
+                  <React.Suspense fallback={<div>Loading...</div>}>
+                    <RecentAchievements />
+                  </React.Suspense>
                 </section>
 
                 <section aria-labelledby="badges-title">
@@ -710,3 +750,4 @@ export default function DashboardPage() {
     </Layout>
   );
 }
+ 

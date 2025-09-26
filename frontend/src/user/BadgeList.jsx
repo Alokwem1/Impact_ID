@@ -39,6 +39,8 @@ import apiClient from "../api/axios";
 import { queryKeys } from "../api/queryKeys";
 import toast from "react-hot-toast";
 import BadgeItem from "../user/BadgeItem";
+import EmptyState from "../components/ui/EmptyState";
+import { ENABLE_UI_ENHANCEMENTS } from "../config/featureFlags";
 
 // ================================
 // 🎯 ENHANCED CONFIGURATION
@@ -429,19 +431,21 @@ export default function BadgeList() {
     },
   });
 
-  // Auto-check for badges on mount and periodically
+  // Auto-check for badges on mount and periodically (skip in test env)
   useEffect(() => {
-    checkBadges();
+    if (!import.meta.env?.TEST) {
+      checkBadges();
 
-    if (autoRefresh) {
-      const interval = setInterval(
-        () => {
-          checkBadges();
-        },
-        5 * 60 * 1000,
-      ); // Check every 5 minutes
+      if (autoRefresh) {
+        const interval = setInterval(
+          () => {
+            checkBadges();
+          },
+          5 * 60 * 1000,
+        ); // Check every 5 minutes
 
-      return () => clearInterval(interval);
+        return () => clearInterval(interval);
+      }
     }
   }, [checkBadges, autoRefresh]);
 
@@ -1011,41 +1015,80 @@ export default function BadgeList() {
             ))}
           </div>
         ) : (
-          <div className="text-center py-12">
-            <TrophyIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-              {searchTerm
-                ? "No badges found"
-                : activeTab === "earned"
-                  ? "No badges earned yet"
-                  : "No badges found"}
-            </h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              {searchTerm
-                ? "Try adjusting your search terms or filters."
-                : activeTab === "earned"
-                  ? "Complete tasks and activities to earn your first badges!"
-                  : "Try adjusting your filters to see more badges."}
-            </p>
-            <div className="space-y-3">
-              {activeTab === "earned" && !searchTerm && (
-                <button
-                  onClick={() => setActiveTab("available")}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
-                >
-                  Browse Available Badges
-                </button>
-              )}
-              {(searchTerm || filters.category || filters.rarity) && (
-                <button
-                  onClick={clearFilters}
-                  className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
-                >
-                  Clear Filters
-                </button>
-              )}
+          ENABLE_UI_ENHANCEMENTS ? (
+            <EmptyState
+              title={
+                searchTerm
+                  ? "No badges found"
+                  : activeTab === "earned"
+                    ? "No badges earned yet"
+                    : "No badges found"
+              }
+              description={
+                searchTerm
+                  ? "Try adjusting your search terms or filters."
+                  : activeTab === "earned"
+                    ? "Complete tasks and activities to earn your first badges!"
+                    : "Try adjusting your filters to see more badges."
+              }
+              action={
+                <div className="space-y-3">
+                  {activeTab === "earned" && !searchTerm && (
+                    <button
+                      onClick={() => setActiveTab("available")}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+                    >
+                      Browse Available Badges
+                    </button>
+                  )}
+                  {(searchTerm || filters.category || filters.rarity) && (
+                    <button
+                      onClick={clearFilters}
+                      className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+                    >
+                      Clear Filters
+                    </button>
+                  )}
+                </div>
+              }
+            />
+          ) : (
+            <div className="text-center py-12">
+              <TrophyIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                {searchTerm
+                  ? "No badges found"
+                  : activeTab === "earned"
+                    ? "No badges earned yet"
+                    : "No badges found"}
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">
+                {searchTerm
+                  ? "Try adjusting your search terms or filters."
+                  : activeTab === "earned"
+                    ? "Complete tasks and activities to earn your first badges!"
+                    : "Try adjusting your filters to see more badges."}
+              </p>
+              <div className="space-y-3">
+                {activeTab === "earned" && !searchTerm && (
+                  <button
+                    onClick={() => setActiveTab("available")}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+                  >
+                    Browse Available Badges
+                  </button>
+                )}
+                {(searchTerm || filters.category || filters.rarity) && (
+                  <button
+                    onClick={clearFilters}
+                    className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+                  >
+                    Clear Filters
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )
         )}
       </div>
 

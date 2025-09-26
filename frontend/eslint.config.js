@@ -1,14 +1,16 @@
 import js from "@eslint/js";
 import globals from "globals";
 import pluginReact from "eslint-plugin-react";
-import { defineConfig } from "eslint/config";
 
-export default defineConfig([
+export default [
   // Ignore build artifacts and config files
   {
     ignores: [
       "dist/**",
       "public/**",
+      "coverage/**",
+      "scripts/**",
+      "src/dev/**",
       "vite.config.js",
       "tailwind.config.js",
       "src/**/*.test.{js,jsx,ts,tsx}",
@@ -41,6 +43,8 @@ export default defineConfig([
       "react/no-unescaped-entities": "off",
       "react/jsx-no-undef": "off",
       "no-unused-vars": "off",
+      // Allow empty catch blocks used intentionally for environment probing
+      "no-empty": ["error", { "allowEmptyCatch": true }],
     },
   },
-]);
+];

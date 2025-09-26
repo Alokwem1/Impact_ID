@@ -82,13 +82,15 @@ export default defineConfig(({ command, mode }) => {
         "@features": resolve(__dirname, "src/features"),
         "@badges": resolve(__dirname, "src/badges"),
 
-  // Hard alias React and ReactDOM to a single package root to avoid duplicate instances
-  // Avoid file-level aliases (like jsx-runtime.js) which can create a second identity
-  react: resolve(__dirname, "node_modules/react"),
-  "react-dom": resolve(__dirname, "node_modules/react-dom"),
+        // Force a single React/ReactDOM identity even with symlinked deps
+        react: resolve(__dirname, "node_modules/react"),
+        "react-dom": resolve(__dirname, "node_modules/react-dom"),
+        "react-dom/client": resolve(__dirname, "node_modules/react-dom/client"),
+        "react/jsx-runtime": resolve(__dirname, "node_modules/react/jsx-runtime.js"),
+        "react/jsx-dev-runtime": resolve(__dirname, "node_modules/react/jsx-dev-runtime.js"),
       },
       extensions: [".js", ".jsx", ".ts", ".tsx", ".json"],
-      dedupe: ["react", "react-dom"],
+  dedupe: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime"],
     },
 
     define: {
@@ -238,6 +240,7 @@ export default defineConfig(({ command, mode }) => {
       include: [
         "react",
         "react-dom",
+        "react/jsx-runtime",
         "react-router-dom",
         "@tanstack/react-query",
         "axios",

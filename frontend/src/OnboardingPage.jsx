@@ -4,6 +4,7 @@ import { useAuth } from "./utils/AuthContext";
 import { useTheme } from "./ThemeContext";
 import apiClient from "./api/axios";
 import toast from "react-hot-toast";
+import debounce from "lodash.debounce";
 import {
   UserIcon,
   SparklesIcon,
@@ -215,30 +216,29 @@ export default function OnboardingPage() {
   // ================================
   // 🔍 USERNAME AVAILABILITY CHECK
   // ================================
+  const checkUsername = debounce(async () => {
+    if (formData.username.length < 3) {
+      setUsernameAvailable(null);
+      return;
+    }
+
+    setCheckingUsername(true);
+    try {
+      const response = await apiClient.get("/api/auth/check-username", {
+        params: { username: formData.username },
+      });
+      setUsernameAvailable(response.data.available);
+    } catch (error) {
+      console.error("Error checking username availability:", error);
+      setUsernameAvailable(false);
+    } finally {
+      setCheckingUsername(false);
+    }
+  }, 500);
+
   useEffect(() => {
-    const checkUsername = async () => {
-      if (formData.username.length < 3) {
-        setUsernameAvailable(null);
-        return;
-      }
-
-      setCheckingUsername(true);
-      try {
-        // Corrected endpoint: backend exposes /api/auth/check-username?username=<value>
-        // Previous implementation incorrectly called /users/check-username/<username>
-        const response = await apiClient.get("/api/auth/check-username", {
-          params: { username: formData.username },
-        });
-        setUsernameAvailable(response.data.available);
-      } catch (error) {
-        setUsernameAvailable(false);
-      } finally {
-        setCheckingUsername(false);
-      }
-    };
-
-    const debounceTimer = setTimeout(checkUsername, 500);
-    return () => clearTimeout(debounceTimer);
+    checkUsername();
+    return () => checkUsername.cancel();
   }, [formData.username]);
 
   // ================================
@@ -282,8 +282,6 @@ export default function OnboardingPage() {
 
     setLoading(true);
     try {
-      // Backend lacks a dedicated onboarding endpoint; perform profile update via /api/users/@me
-      // Only send allowed fields (username, bio). fullName isn't a backend field; treat as display name stored in bio prefix or ignore.
       await apiClient.put("/api/users/@me", {
         username: formData.username.trim(),
         bio: formData.bio ? formData.bio.trim() : undefined,
@@ -292,6 +290,7 @@ export default function OnboardingPage() {
       toast.success("Welcome to Impact ID! 🎉");
       setShowModal(true);
     } catch (err) {
+      console.error("Error during onboarding:", err);
       toast.error(err.response?.data?.detail || "Onboarding failed.");
     } finally {
       setLoading(false);

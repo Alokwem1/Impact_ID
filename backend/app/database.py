@@ -37,10 +37,12 @@ class DatabaseConfig:
 
     def __init__(self):
         """__init__ function."""
-        self.database_url = self._get_database_url()
+        # Initialize environment flags first so helpers can reference them
         self.environment = os.getenv("ENVIRONMENT", "development").lower()
         self.is_production = self.environment == "production"
         self.is_testing = self.environment == "testing"
+        # Now resolve database URL with correct environment context
+        self.database_url = self._get_database_url()
 
         # Connection settings
         self.pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
@@ -87,12 +89,16 @@ class DatabaseConfig:
         }
 
         if "sqlite" in self.database_url:
+            # For SQLite, especially in-memory during tests, use StaticPool so the same
+            # connection is shared across the application lifecycle. This guarantees
+            # a stable, single in-memory database that persists across sessions within
+            # the test process.
             kwargs.update({
                 "connect_args": {
                     "check_same_thread": False,
                     "timeout": self.query_timeout,
                 },
-                "poolclass": StaticPool if not self.is_testing else NullPool,
+                "poolclass": StaticPool,
             })
         else:
             # PostgreSQL/MySQL configuration
