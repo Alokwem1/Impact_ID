@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./utils/AuthContext";
 import { queryKeys } from "./api/queryKeys";
 import { authEvents, AUTH_EVENT } from "./utils/authEvents";
+import { getApiBaseUrl } from "./api/axios";
 import toast from "react-hot-toast";
 
 // ================================
@@ -11,16 +12,32 @@ import toast from "react-hot-toast";
 // ================================
 
 const WS_CONFIG = {
-  // Determine WebSocket URL based on environment
-  getWebSocketURL: (userId) => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const host = import.meta.env.DEV ? "localhost:8000" : window.location.host;
-    // Backend websocket lives at /api/activities/live and accepts ?token= for auth
+  // Determine WebSocket URL based on environment and VITE_API_BASE_URL
+  getWebSocketURL: () => {
     const token =
       localStorage.getItem("accessToken") ||
       sessionStorage.getItem("accessToken");
-    const qs = token ? `?token=${encodeURIComponent(token)}` : "";
-    return `${protocol}://${host}/api/activities/live${qs}`;
+
+    // In dev, prefer localhost:8000
+    if (import.meta.env.DEV) {
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+      return `${protocol}://localhost:8000/api/activities/live${qs}`;
+    }
+
+    // In production, use API base URL origin when provided; fallback to window.location
+    try {
+      const base = new URL(getApiBaseUrl());
+      const wsProtocol = base.protocol === "https:" ? "wss" : "ws";
+      const host = base.host; // includes port if present
+      const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+      return `${wsProtocol}://${host}/api/activities/live${qs}`;
+    } catch (e) {
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const host = window.location.host;
+      const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+      return `${protocol}://${host}/api/activities/live${qs}`;
+    }
   },
 
   // Reconnection settings
