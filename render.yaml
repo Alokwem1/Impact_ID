@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: impact-id-backend
+    env: docker
+    plan: free
+    autoDeploy: true
+    rootDir: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: RUN_DB_MIGRATIONS
+        value: "1"
+      - key: DEBUG
+        value: "false"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false # set in Render dashboard from your Neon/Supabase connection string
+      - key: ALLOWED_ORIGINS
+        sync: false # e.g. https://your-pages-site.pages.dev,https://app.yourdomain.com
